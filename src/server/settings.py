@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     # GitHub
     GITHUB_TOKEN: Optional[str] = None
     
+    # LLM API Configuration
+    OPENAI_API_KEY: Optional[str] = None
+    DEFAULT_LLM_MODEL: str = "gpt-4-turbo-preview"
+    LLM_MAX_TOKENS: int = 4096
+    LLM_TEMPERATURE: float = 0.7
+    
     # Limits
     MAX_DIFF_BYTES: int = 10485760  # 10MB
     

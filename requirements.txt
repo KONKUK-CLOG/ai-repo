@@ -7,4 +7,5 @@ pytest==7.4.3
 pytest-asyncio==0.21.1
 anyio==4.1.0
 python-multipart==0.0.6
+openai==1.54.0
 

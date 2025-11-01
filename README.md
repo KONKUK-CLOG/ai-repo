@@ -94,9 +94,11 @@ ts-llm-mcp-bridge/
 }
 ```
 
-### LLM 에이전트 (자연어 명령)
+### LLM 에이전트 (자연어 명령) 🤖
 
 - `POST /api/v1/llm/execute` - 자연어 명령을 LLM이 해석하고 적절한 툴 실행
+- **OpenAI GPT-4를 사용하여 실제로 동작합니다**
+- API 키가 없으면 키워드 기반 폴백 로직 사용
 
 **LLM 에이전트 실행 예시**:
 ```json
@@ -150,6 +152,12 @@ NOTION_TOKEN=your-notion-token
 # GitHub
 GITHUB_TOKEN=your-github-token
 
+# LLM API
+OPENAI_API_KEY=your-openai-api-key
+DEFAULT_LLM_MODEL=gpt-4-turbo-preview
+LLM_MAX_TOKENS=4096
+LLM_TEMPERATURE=0.7
+
 # Limits
 MAX_DIFF_BYTES=10485760
 ```
@@ -168,6 +176,13 @@ pip install -r requirements.txt
 cp .env.example .env
 # .env 파일을 편집하여 실제 값 입력
 ```
+
+**중요: LLM 에이전트 사용을 위해서는 OpenAI API 키가 필요합니다**
+```env
+OPENAI_API_KEY=sk-...your-actual-key...
+```
+- [OpenAI API Keys](https://platform.openai.com/api-keys)에서 키 발급
+- API 키가 없으면 키워드 기반 폴백 모드로 동작
 
 3. **서버 실행**:
 ```bash

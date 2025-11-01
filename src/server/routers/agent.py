@@ -7,7 +7,10 @@ from src.server.schemas import (
     ToolCall
 )
 from src.server.routers.commands import TOOLS_REGISTRY
+from src.server.settings import settings
+from openai import AsyncOpenAI
 import logging
+import json
 
 router = APIRouter(prefix="/api/v1/llm", tags=["llm-agent"])
 logger = logging.getLogger(__name__)
@@ -42,10 +45,10 @@ async def call_llm_with_tools(
     available_tools: list,
     model: str = None
 ) -> tuple[str, list[dict]]:
-    """Call LLM with available tools and get tool calls.
+    """Call OpenAI GPT with available tools and get tool calls.
     
-    이 함수는 실제 LLM API 호출을 시뮬레이션합니다.
-    실제 구현 시에는 Anthropic, OpenAI 등의 API를 호출해야 합니다.
+    OpenAI GPT API를 호출하여 사용자의 자연어 명령을 분석하고
+    적절한 툴을 선택합니다.
     
     Args:
         prompt: User's natural language command
@@ -56,17 +59,106 @@ async def call_llm_with_tools(
     Returns:
         Tuple of (thought_process, tool_calls_to_make)
     """
-    # DUMMY IMPLEMENTATION
-    # 실제로는 여기서 LLM API를 호출합니다:
-    # - Anthropic Claude API (messages API with tools)
-    # - OpenAI GPT API (chat completions with function calling)
-    
     logger.info(f"LLM called with prompt: {prompt}")
     logger.info(f"Available tools: {[t['name'] for t in available_tools]}")
     logger.info(f"Context keys: {list(context.keys())}")
     
-    # 더미 응답: 프롬프트 키워드 기반으로 툴 선택
-    thought = "사용자의 요청을 분석하여 적절한 툴을 선택합니다."
+    # API 키 확인
+    if not settings.OPENAI_API_KEY:
+        logger.warning("OPENAI_API_KEY not set - using fallback dummy logic")
+        return _fallback_tool_selection(prompt, context)
+    
+    # 1. OpenAI 클라이언트 생성
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    
+    # 2. 시스템 프롬프트 구성
+    system_prompt = """당신은 코드 관리 및 문서화 작업을 돕는 AI 어시스턴트입니다.
+사용자의 요청을 분석하여 적절한 툴을 선택하고 실행하세요.
+
+사용 가능한 툴:
+- post_blog_article: 블로그에 글 발행
+- update_code_index: 코드 변경사항을 벡터/그래프 인덱스에 반영
+- refresh_rag_indexes: RAG 인덱스 전체 리프레시
+- publish_to_notion: Notion에 페이지 발행
+- create_commit_and_push: Git 커밋 후 푸시
+
+컨텍스트에 있는 정보를 최대한 활용하여 적절한 파라미터를 구성하세요."""
+    
+    # 3. 사용자 메시지 구성
+    context_str = json.dumps(context, ensure_ascii=False, indent=2) if context else "없음"
+    user_message = f"""사용자 요청: {prompt}
+
+추가 컨텍스트:
+{context_str}
+
+위 요청을 처리하기 위해 필요한 툴을 선택하고 실행하세요."""
+    
+    # 4. 툴 스키마를 OpenAI 형식으로 변환
+    openai_tools = []
+    for tool in available_tools:
+        openai_tools.append({
+            "type": "function",
+            "function": {
+                "name": tool["name"],
+                "description": tool.get("description", ""),
+                "parameters": tool.get("input_schema", {})
+            }
+        })
+    
+    # 5. LLM 호출
+    try:
+        response = await client.chat.completions.create(
+            model=model or settings.DEFAULT_LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            tools=openai_tools,
+            tool_choice="auto",
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS
+        )
+        
+        logger.info(f"LLM response received from {response.model}")
+        
+        # 6. 응답 파싱
+        message = response.choices[0].message
+        thought = message.content or "툴 실행을 시작합니다."
+        tool_calls = []
+        
+        if message.tool_calls:
+            for tool_call in message.tool_calls:
+                try:
+                    params = json.loads(tool_call.function.arguments)
+                    tool_calls.append({
+                        "tool": tool_call.function.name,
+                        "params": params
+                    })
+                    logger.info(f"Tool selected: {tool_call.function.name}")
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse tool arguments: {e}")
+                    continue
+        
+        # 툴이 선택되지 않은 경우
+        if not tool_calls:
+            logger.warning("LLM did not select any tools")
+            thought = thought or "요청을 처리할 적절한 툴을 찾지 못했습니다."
+        
+        return thought, tool_calls
+        
+    except Exception as e:
+        logger.error(f"LLM API call failed: {e}")
+        # 폴백: 더미 로직 사용
+        return _fallback_tool_selection(prompt, context)
+
+
+def _fallback_tool_selection(prompt: str, context: dict) -> tuple[str, list[dict]]:
+    """Fallback tool selection when LLM API is unavailable.
+    
+    API 키가 없거나 LLM 호출이 실패한 경우 사용되는 키워드 기반 폴백 로직.
+    """
+    logger.info("Using fallback keyword-based tool selection")
+    thought = "LLM API를 사용할 수 없어 키워드 기반 매칭을 사용합니다."
     tool_calls = []
     
     prompt_lower = prompt.lower()
@@ -186,28 +278,30 @@ async def execute_llm_command(
                 ))
         
         # 4. 최종 응답 생성
-        # 실제로는 툴 실행 결과를 다시 LLM에게 전달하여 최종 응답 생성
         successful_tools = [tc.tool for tc in executed_tool_calls if tc.success]
         failed_tools = [tc.tool for tc in executed_tool_calls if not tc.success]
         
-        if failed_tools:
-            final_response = (
-                f"일부 작업을 완료했습니다. "
-                f"성공: {', '.join(successful_tools) if successful_tools else '없음'}, "
-                f"실패: {', '.join(failed_tools)}"
-            )
+        # LLM에게 툴 실행 결과를 전달하여 최종 응답 생성
+        if settings.OPENAI_API_KEY:
+            try:
+                final_response = await _generate_final_response(
+                    request.prompt,
+                    executed_tool_calls,
+                    request.model
+                )
+            except Exception as e:
+                logger.error(f"Failed to generate final response from LLM: {e}")
+                # 폴백 응답
+                final_response = _create_fallback_response(successful_tools, failed_tools)
         else:
-            final_response = (
-                f"요청하신 작업을 모두 완료했습니다. "
-                f"실행된 작업: {', '.join(successful_tools)}"
-            )
+            final_response = _create_fallback_response(successful_tools, failed_tools)
         
         return LLMExecuteResult(
             ok=len(failed_tools) == 0,
             thought=thought,
             tool_calls=executed_tool_calls,
             final_response=final_response,
-            model_used=request.model or "dummy-model"
+            model_used=request.model or settings.DEFAULT_LLM_MODEL
         )
         
     except Exception as e:
@@ -215,5 +309,66 @@ async def execute_llm_command(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to execute LLM command: {str(e)}"
+        )
+
+
+async def _generate_final_response(
+    original_prompt: str,
+    tool_calls: list[ToolCall],
+    model: str = None
+) -> str:
+    """Generate final user-friendly response using LLM.
+    
+    툴 실행 결과를 LLM에게 전달하여 사용자 친화적인 최종 응답을 생성합니다.
+    """
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    
+    # 툴 실행 결과 요약
+    tool_results_summary = []
+    for tc in tool_calls:
+        status = "✅ 성공" if tc.success else "❌ 실패"
+        tool_results_summary.append(
+            f"{status} {tc.tool}: {json.dumps(tc.result, ensure_ascii=False)[:200]}"
+        )
+    
+    summary_text = "\n".join(tool_results_summary)
+    
+    response = await client.chat.completions.create(
+        model=model or settings.DEFAULT_LLM_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": "당신은 작업 결과를 사용자에게 친절하고 명확하게 전달하는 어시스턴트입니다."
+            },
+            {
+                "role": "user",
+                "content": f"""사용자 요청: {original_prompt}
+
+실행된 작업 결과:
+{summary_text}
+
+위 결과를 바탕으로 사용자에게 친절하고 명확한 최종 응답을 한국어로 작성해주세요.
+간결하게 2-3문장으로 요약해주세요."""
+            }
+        ],
+        temperature=0.7,
+        max_tokens=500
+    )
+    
+    return response.choices[0].message.content or "작업이 완료되었습니다."
+
+
+def _create_fallback_response(successful_tools: list[str], failed_tools: list[str]) -> str:
+    """Create fallback response when LLM is unavailable."""
+    if failed_tools:
+        return (
+            f"일부 작업을 완료했습니다. "
+            f"성공: {', '.join(successful_tools) if successful_tools else '없음'}, "
+            f"실패: {', '.join(failed_tools)}"
+        )
+    else:
+        return (
+            f"요청하신 작업을 모두 완료했습니다. "
+            f"실행된 작업: {', '.join(successful_tools)}"
         )
 
