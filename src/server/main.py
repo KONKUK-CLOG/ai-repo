@@ -2,7 +2,7 @@
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from src.server.routers import health, diffs, commands
+from src.server.routers import health, diffs, commands, agent
 from src.server.settings import settings
 
 # Configure logging
@@ -33,6 +33,7 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(diffs.router)
 app.include_router(commands.router)
+app.include_router(agent.router)
 
 
 @app.get("/")

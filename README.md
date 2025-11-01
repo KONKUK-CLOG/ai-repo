@@ -81,7 +81,7 @@ ts-llm-mcp-bridge/
 ### 명령 실행
 
 - `GET /api/v1/commands` - 사용 가능한 명령(툴) 스키마 조회
-- `POST /api/v1/commands/execute` - 고수준 명령(툴) 실행
+- `POST /api/v1/commands/execute` - 고수준 명령(툴) 실행 (직접 툴 지정)
 
 **명령 실행 예시**:
 ```json
@@ -93,6 +93,32 @@ ts-llm-mcp-bridge/
   }
 }
 ```
+
+### LLM 에이전트 (자연어 명령)
+
+- `POST /api/v1/llm/execute` - 자연어 명령을 LLM이 해석하고 적절한 툴 실행
+
+**LLM 에이전트 실행 예시**:
+```json
+{
+  "prompt": "코드 변경사항을 인덱스에 반영하고, 변경 내용을 요약해서 블로그에 올려줘",
+  "context": {
+    "diff": {
+      "files": [
+        {
+          "path": "src/main.py",
+          "status": "modified"
+        }
+      ]
+    }
+  },
+  "model": "claude-3-5-sonnet"
+}
+```
+
+**차이점**:
+- `/api/v1/commands/execute`: TS가 **어떤 툴을 사용할지 직접 지정**
+- `/api/v1/llm/execute`: **LLM이 자율적으로 툴을 선택하고 실행**
 
 ## 환경 변수
 
@@ -213,6 +239,25 @@ curl -X POST http://localhost:8000/api/v1/diffs/apply \
       }
     ]
   }'
+
+# LLM 에이전트로 자연어 명령 실행
+curl -X POST http://localhost:8000/api/v1/llm/execute \
+  -H "x-api-key: dev-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "코드 변경사항을 인덱스에 반영하고 블로그 글도 써줘",
+    "context": {
+      "diff": {
+        "files": [
+          {
+            "path": "src/main.py",
+            "status": "modified"
+          }
+        ]
+      }
+    },
+    "model": "claude-3-5-sonnet"
+  }'
 ```
 
 ### Python 클라이언트
@@ -224,6 +269,7 @@ API_URL = "http://localhost:8000"
 API_KEY = "dev-api-key"
 
 async def post_article(title: str, markdown: str):
+    """직접 툴을 지정하여 실행"""
     async with httpx.AsyncClient() as client:
         response = await client.post(
             f"{API_URL}/api/v1/commands/execute",
@@ -237,6 +283,26 @@ async def post_article(title: str, markdown: str):
             }
         )
         return response.json()
+
+async def execute_natural_language_command(prompt: str, context: dict = None):
+    """자연어 명령을 LLM에게 전달하여 실행"""
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{API_URL}/api/v1/llm/execute",
+            headers={"x-api-key": API_KEY},
+            json={
+                "prompt": prompt,
+                "context": context or {},
+                "model": "claude-3-5-sonnet"
+            }
+        )
+        return response.json()
+
+# 사용 예시
+# result = await execute_natural_language_command(
+#     "이 코드 변경사항을 인덱스에 추가하고 블로그에도 올려줘",
+#     context={"diff": {...}}
+# )
 ```
 
 ## MCP 서버 실행
