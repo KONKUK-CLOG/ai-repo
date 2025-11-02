@@ -478,6 +478,58 @@ data/
 3. **감사 추적**: 모든 변경사항의 완전한 로그
 4. **효율성**: Content를 별도 파일로 저장하여 메타데이터 검색 빠름
 
+## TODO List
+
+### 1. ✍️ 코드 이해 및 문서화
+- [ ] **`/routers` 주석 달고 이해하기**
+  - `health.py`: 헬스체크 엔드포인트
+  - `diffs.py`: Diff 적용 및 WAL 통합
+  - `agent.py`: LLM 에이전트 (OpenAI GPT)
+  - `commands.py`: 직접 툴 실행 (개발 전용)
+  - 각 엔드포인트의 동작 방식 문서화
+
+### 2. 👥 멀티 유저 지원
+- [ ] **사용자별로 데이터 관리 로직 구축**
+  - 사용자 인증 및 권한 관리 시스템
+  - 사용자별 Vector DB 컬렉션 분리 (`user_{id}_code_embeddings`)
+  - 사용자별 Graph DB 네임스페이스 또는 라벨 분리
+  - 사용자별 WAL 로그 분리 (`data/wal_{user_id}.jsonl`)
+  - API 요청 시 사용자 식별 및 격리
+
+### 3. 🗄️ 데이터베이스 내부 로직 이해
+- [ ] **Vector DB (Qdrant) 내부 로직 이해**
+  - HNSW (Hierarchical Navigable Small World) 인덱스 구조
+  - Upsert 시 벡터 검색 및 업데이트 메커니즘
+  - 코사인 유사도 기반 검색 알고리즘
+  - 임베딩 차원(1536) 및 메모리 사용량
+  - 성능 최적화 (배치 처리, 인덱싱 파라미터)
+
+- [ ] **Graph DB (Neo4j) 내부 로직 이해**
+  - Cypher 쿼리 최적화
+  - 노드 및 관계 인덱싱 전략
+  - MERGE vs CREATE vs MATCH 성능 차이
+  - 트랜잭션 및 ACID 속성
+  - 그래프 순회 알고리즘 (BFS, DFS)
+
+### 4. 🔄 Diff 기반 업데이트 로직 심화
+- [ ] **Diff 기반 DB 업데이트 로직 이해**
+  - Unified diff vs Files array 파싱 메커니즘
+  - 파일 해시 기반 변경 감지 (MD5)
+  - 증분 업데이트 vs 전체 업데이트 트레이드오프
+  - AST 파싱으로 코드 구조 추출 (함수, 클래스, 임포트)
+  - 삭제된 파일 처리 및 고아 노드 방지
+  - 대용량 파일 처리 전략 (청킹, 스트리밍)
+
+### 진행 상황
+- [x] WAL 구현 (content 별도 파일 저장)
+- [x] 백그라운드 스케줄러 (WAL 복구, 정리)
+- [x] Vector DB 실제 구현 (Qdrant + OpenAI)
+- [x] Graph DB 실제 구현 (Neo4j + AST 파싱)
+- [x] 클라이언트-서버 아키텍처 분리
+- [ ] 멀티 유저 지원
+- [ ] 성능 최적화 및 모니터링
+- [ ] 프로덕션 배포 가이드
+
 ## 의존성
 
 주요 라이브러리:
