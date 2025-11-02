@@ -8,4 +8,7 @@ pytest-asyncio==0.21.1
 anyio==4.1.0
 python-multipart==0.0.6
 openai==1.54.0
+qdrant-client==1.7.0
+neo4j==5.15.0
+APScheduler==3.10.4
 

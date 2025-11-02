@@ -34,3 +34,11 @@ htmlcov/
 *.log
 .DS_Store
 
+# WAL logs and data
+data/
+*.jsonl
+
+# IDE
+.vscode/
+.idea/
+

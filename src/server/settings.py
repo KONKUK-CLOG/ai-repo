@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 4096
     LLM_TEMPERATURE: float = 0.7
     
+    # Feature Flags
+    ENABLE_DIRECT_TOOLS: bool = False  # 개발 환경에서만 직접 툴 실행 엔드포인트 활성화
+    
     # Limits
     MAX_DIFF_BYTES: int = 10485760  # 10MB
     

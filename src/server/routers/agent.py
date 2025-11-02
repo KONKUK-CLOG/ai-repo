@@ -6,14 +6,34 @@ from src.server.schemas import (
     LLMExecuteResult,
     ToolCall
 )
-from src.server.routers.commands import TOOLS_REGISTRY
 from src.server.settings import settings
 from openai import AsyncOpenAI
+from src.mcp.tools import (
+    post_blog_article,
+    update_code_index,
+    refresh_rag_indexes,
+    publish_to_notion,
+    create_commit_and_push
+)
 import logging
 import json
 
 router = APIRouter(prefix="/api/v1/llm", tags=["llm-agent"])
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# 툴 레지스트리 (Tool Registry)
+# ============================================================================
+
+# 사용 가능한 모든 툴의 중앙 레지스트리
+# agent.py와 commands.py에서 공유하여 사용
+TOOLS_REGISTRY = {
+    "post_blog_article": post_blog_article,           # 블로그 글 발행
+    "update_code_index": update_code_index,           # 코드 인덱스 업데이트
+    "refresh_rag_indexes": refresh_rag_indexes,       # RAG 인덱스 리프레시
+    "publish_to_notion": publish_to_notion,           # Notion 페이지 발행
+    "create_commit_and_push": create_commit_and_push, # Git 커밋 & 푸시
+}
 
 
 async def execute_tool_by_name(tool_name: str, params: dict) -> dict:
