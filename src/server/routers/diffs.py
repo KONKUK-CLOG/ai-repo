@@ -21,8 +21,9 @@ WAL 패턴 적용:
 3. CI/CD: 파이프라인에서 배포 전 인덱스 동기화
 """
 from fastapi import APIRouter, Depends, HTTPException, status
-from src.server.deps import verify_api_key
+from src.server.deps import get_current_user
 from src.server.schemas import DiffApplyRequest, DiffApplyResult
+from src.models.user import User
 from src.server.settings import settings
 from src.adapters import vector_db, graph_db
 from src.background.wal import wal
@@ -36,7 +37,7 @@ logger = logging.getLogger(__name__)
 @router.post("/apply", response_model=DiffApplyResult)
 async def apply_diff(
     request: DiffApplyRequest,
-    api_key: str = Depends(verify_api_key)
+    user: User = Depends(get_current_user)
 ) -> DiffApplyResult:
     """코드 diff를 벡터 DB와 그래프 DB에 적용합니다.
     
@@ -70,7 +71,7 @@ async def apply_diff(
             - unified: Unified diff 문자열 (선택)
             - files: 파일 변경 배열 (선택)
             둘 중 하나는 반드시 제공되어야 함
-        api_key: 검증된 API 키 (헤더에서 자동 추출 및 검증)
+        user: 인증된 사용자 (헤더에서 자동 추출 및 검증)
         
     Returns:
         Diff 적용 결과 및 통계
@@ -149,18 +150,46 @@ async def apply_diff(
             ]
             
             # 각 파일마다 --- 와 +++ 2개 라인이 있으므로 중복 제거 후 /2
-            files_processed = len(set(affected_files)) // 2
+            unique_files = list(set(affected_files))
+            files_processed = len(unique_files) // 2
             
             # ⚠️ Unified diff 모드는 파일 전체 내용을 알 수 없음
             # 실제 파일 시스템에서 읽어야 함
             logger.warning("Unified diff mode: file contents not provided, skipping vector DB update")
             embeddings_upserted = 0
             
+            # WAL에 그래프 업데이트 작업 로깅
+            wal_entries = {}
+            for file_path in unique_files:
+                wal_id = await wal.append({
+                    "type": "graph_update",
+                    "file": file_path,
+                    "content": None,
+                    "hash": hashlib.md5(request.unified.encode()).hexdigest()
+                })
+                wal_entries[file_path] = wal_id
+            
             # 그래프 DB 업데이트 (파일 경로만으로도 가능)
-            graph_nodes_updated = await graph_db.update_code_graph(
-                files=affected_files,
-                contents=None  # 내용 없이 파일 노드만 업데이트
-            )
+            try:
+                graph_nodes_updated = await graph_db.update_code_graph(
+                    files=unique_files,
+                    contents=None,  # 내용 없이 파일 노드만 업데이트
+                    user_id=user.id  # 사용자 ID 전달
+                )
+                
+                # 성공한 파일들의 WAL 표시
+                for file_path in unique_files:
+                    if file_path in wal_entries:
+                        await wal.mark_success(wal_entries[file_path])
+                        
+            except Exception as e:
+                logger.error(f"Graph DB update failed in unified mode: {e}")
+                graph_nodes_updated = 0
+                
+                # 실패한 파일들의 WAL 표시
+                for file_path in unique_files:
+                    if file_path in wal_entries:
+                        await wal.mark_failure(wal_entries[file_path], str(e))
         
         # 4-B. Files array 모드 처리
         elif request.files:
@@ -185,7 +214,8 @@ async def apply_diff(
                     wal_id = await wal.append({
                         "type": "delete",
                         "file": file_item.path,
-                        "hash": None
+                        "hash": None,
+                        "user_id": user.id  # 사용자 ID 전달
                     })
                     wal_entries[file_item.path] = wal_id
                 else:
@@ -198,7 +228,8 @@ async def apply_diff(
                             "type": "upsert",
                             "file": file_item.path,
                             "content": content,
-                            "hash": hashlib.md5(content.encode()).hexdigest()
+                            "hash": hashlib.md5(content.encode()).hexdigest(),
+                            "user_id": user.id  # 사용자 ID 전달
                         })
                         wal_entries[file_item.path] = wal_id
                         
@@ -214,7 +245,8 @@ async def apply_diff(
             try:
                 embeddings_upserted = await vector_db.upsert_embeddings(
                     collection=settings.VECTOR_DB_COLLECTION,
-                    documents=documents
+                    documents=documents,
+                    user_id=user.id  # 사용자 ID 전달
                 )
                 logger.info(f"Vector DB: upserted {embeddings_upserted} embeddings")
                 
@@ -237,9 +269,10 @@ async def apply_diff(
                 try:
                     await vector_db.delete_embeddings(
                         collection=settings.VECTOR_DB_COLLECTION,
-                        file_paths=deleted_files
+                        file_paths=deleted_files,
+                        user_id=user.id  # 사용자 ID 전달
                     )
-                    await graph_db.delete_file_nodes(deleted_files)
+                    await graph_db.delete_file_nodes(deleted_files, user_id=user.id)
                     logger.info(f"Deleted {len(deleted_files)} files from DBs")
                     
                     # 성공한 삭제 작업의 WAL 표시
@@ -259,7 +292,8 @@ async def apply_diff(
             try:
                 graph_nodes_updated = await graph_db.update_code_graph(
                     files=[f for f in file_paths if f not in deleted_files],
-                    contents=file_contents  # 파일 내용 전달
+                    contents=file_contents,  # 파일 내용 전달
+                    user_id=user.id  # 사용자 ID 전달
                 )
                 logger.info(f"Graph DB: updated {graph_nodes_updated} nodes")
             except Exception as e:

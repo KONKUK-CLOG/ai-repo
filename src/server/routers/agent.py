@@ -1,6 +1,7 @@
 """LLM agent endpoints for natural language command execution."""
 from fastapi import APIRouter, Depends, HTTPException, status
-from src.server.deps import verify_api_key
+from src.server.deps import get_current_user
+from src.models.user import User
 from src.server.schemas import (
     LLMExecuteRequest,
     LLMExecuteResult,
@@ -234,7 +235,7 @@ def _fallback_tool_selection(prompt: str, context: dict) -> tuple[str, list[dict
 @router.post("/execute", response_model=LLMExecuteResult)
 async def execute_llm_command(
     request: LLMExecuteRequest,
-    api_key: str = Depends(verify_api_key)
+    user: User = Depends(get_current_user)
 ) -> LLMExecuteResult:
     """사용자의 자연어 명령을 LLM이 해석하고 실행합니다.
     

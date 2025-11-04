@@ -38,12 +38,15 @@ class WriteAheadLog:
     async def append(self, operation: Dict[str, Any]) -> str:
         """작업을 로그에 추가
         
+        다중 사용자 지원: operation에 user_id를 포함하여 사용자별로 작업을 추적합니다.
+        
         Args:
             operation: 작업 정보
                 - type: "upsert" or "delete"
                 - file: 파일 경로
                 - content: 파일 내용 (upsert만, 별도 파일로 저장)
                 - hash: 파일 해시
+                - user_id: 사용자 ID (optional, 기본값 0은 레거시 데이터용)
                 
         Returns:
             로그 엔트리 ID
@@ -70,6 +73,7 @@ class WriteAheadLog:
                 "timestamp": datetime.now().isoformat(),
                 "operation": operation["type"],
                 "file": operation["file"],
+                "user_id": operation.get("user_id", 0),  # 사용자 ID (기본값 0)
                 "hash": operation.get("hash"),
                 "content_file": content_file_path,  # 별도 파일 경로
                 "content_length": len(content),
@@ -119,8 +123,17 @@ class WriteAheadLog:
             if updated:
                 logger.debug(f"WAL: Updated {entry_id} to {status}")
     
-    async def get_failed_operations(self) -> List[Dict[str, Any]]:
-        """실패한 작업 목록 조회"""
+    async def get_failed_operations(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """실패한 작업 목록 조회.
+        
+        다중 사용자 지원: user_id가 제공되면 해당 사용자의 작업만 반환합니다.
+        
+        Args:
+            user_id: 사용자 ID (optional, None이면 모든 사용자)
+            
+        Returns:
+            실패한 작업 목록
+        """
         if not self.log_file.exists():
             return []
         
@@ -130,12 +143,23 @@ class WriteAheadLog:
                 if line.strip():
                     entry = json.loads(line)
                     if entry["status"] == "failed":
-                        failed_ops.append(entry)
+                        # user_id 필터링 (제공된 경우)
+                        if user_id is None or entry.get("user_id", 0) == user_id:
+                            failed_ops.append(entry)
         
         return failed_ops
     
-    async def get_pending_operations(self) -> List[Dict[str, Any]]:
-        """미완료 작업 목록 조회"""
+    async def get_pending_operations(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """미완료 작업 목록 조회.
+        
+        다중 사용자 지원: user_id가 제공되면 해당 사용자의 작업만 반환합니다.
+        
+        Args:
+            user_id: 사용자 ID (optional, None이면 모든 사용자)
+            
+        Returns:
+            미완료 작업 목록
+        """
         if not self.log_file.exists():
             return []
         
@@ -145,7 +169,9 @@ class WriteAheadLog:
                 if line.strip():
                     entry = json.loads(line)
                     if entry["status"] == "pending":
-                        pending_ops.append(entry)
+                        # user_id 필터링 (제공된 경우)
+                        if user_id is None or entry.get("user_id", 0) == user_id:
+                            pending_ops.append(entry)
         
         return pending_ops
     

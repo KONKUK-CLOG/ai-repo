@@ -21,7 +21,8 @@ agent.py와 달리 LLM이 개입하지 않으며, 개발자가 이미 어떤 툴
 """
 from fastapi import APIRouter, Depends, HTTPException, Header, status
 from typing import Optional
-from src.server.deps import verify_api_key
+from src.server.deps import get_current_user
+from src.models.user import User
 from src.server.schemas import (
     CommandExecuteRequest,
     CommandExecuteResult,
@@ -40,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 @router.get("", response_model=CommandsListResponse)
 async def list_commands(
-    api_key: str = Depends(verify_api_key)
+    user: User = Depends(get_current_user)
 ) -> CommandsListResponse:
     """사용 가능한 모든 툴의 메타데이터를 조회합니다.
     
@@ -56,7 +57,7 @@ async def list_commands(
     - input_schema: JSON Schema 형식의 입력 파라미터 스키마
     
     Args:
-        api_key: 검증된 API 키 (헤더에서 자동 추출 및 검증)
+        user: 인증된 사용자 (헤더에서 자동 추출 및 검증)
         
     Returns:
         사용 가능한 모든 툴의 스키마 목록
@@ -106,7 +107,7 @@ async def list_commands(
 @router.post("/execute", response_model=CommandExecuteResult)
 async def execute_command(
     request: CommandExecuteRequest,
-    api_key: str = Depends(verify_api_key),
+    user: User = Depends(get_current_user),
     x_idempotency_key: Optional[str] = Header(None)
 ) -> CommandExecuteResult:
     """지정된 툴을 실행합니다.

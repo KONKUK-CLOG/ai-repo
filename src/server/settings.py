@@ -7,9 +7,16 @@ class Settings(BaseSettings):
     """Application configuration settings."""
     
     # Server Configuration
-    SERVER_API_KEY: str = "dev-api-key"
     SERVER_HOST: str = "0.0.0.0"
     SERVER_PORT: int = 8000
+    
+    # GitHub OAuth (다중 사용자 인증)
+    GITHUB_CLIENT_ID: Optional[str] = None
+    GITHUB_CLIENT_SECRET: Optional[str] = None
+    GITHUB_REDIRECT_URI: str = "http://localhost:8000/auth/github/callback"
+    
+    # GitHub (기존 - git 작업용)
+    GITHUB_TOKEN: Optional[str] = None
     
     # Blog API
     BLOG_API_URL: str = "https://api.example.com/blog"
@@ -27,9 +34,6 @@ class Settings(BaseSettings):
     
     # Notion
     NOTION_TOKEN: Optional[str] = None
-    
-    # GitHub
-    GITHUB_TOKEN: Optional[str] = None
     
     # LLM API Configuration
     OPENAI_API_KEY: Optional[str] = None

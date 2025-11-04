@@ -4,7 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from src.server.routers import health, diffs, agent
+from src.server.routers import health, diffs, agent, auth
 from src.server.settings import settings
 from src.background.scheduler import start_scheduler, shutdown_scheduler, run_task_now
 
@@ -57,6 +57,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(health.router)
+app.include_router(auth.router)  # Auth router (no API key required)
 app.include_router(diffs.router)
 app.include_router(agent.router)
 

@@ -4,7 +4,80 @@
 모든 스키마는 Pydantic BaseModel을 상속받아 자동 검증 및 문서화를 지원합니다.
 """
 from typing import Any, Dict, List, Literal, Optional
+from datetime import datetime
 from pydantic import BaseModel, Field
+
+
+# ============================================================================
+# User & Auth 관련 스키마
+# ============================================================================
+
+class UserPublic(BaseModel):
+    """공개용 사용자 정보 (API 키 제외).
+    
+    클라이언트에게 반환할 때 사용하는 모델입니다.
+    보안을 위해 API 키는 제외합니다.
+    
+    Attributes:
+        id: 내부 사용자 ID
+        github_id: GitHub 사용자 ID
+        username: GitHub 사용자명
+        email: 사용자 이메일
+        name: 사용자 표시 이름
+        created_at: 계정 생성 시각
+        last_login: 마지막 로그인 시각
+    """
+    id: int
+    github_id: int
+    username: str
+    email: Optional[str] = None
+    name: Optional[str] = None
+    created_at: datetime
+    last_login: Optional[datetime] = None
+
+
+class AuthCallbackResponse(BaseModel):
+    """GitHub OAuth callback 응답 모델.
+    
+    인증 성공 후 클라이언트에게 반환되는 정보입니다.
+    API 키를 포함하므로 클라이언트는 이를 저장하여 이후 요청에 사용합니다.
+    
+    Attributes:
+        success: 인증 성공 여부
+        api_key: 사용자 API 키 (이후 x-api-key 헤더에 사용)
+        user: 사용자 공개 정보
+        message: 성공 메시지
+    
+    Example:
+        >>> response = AuthCallbackResponse(
+        ...     success=True,
+        ...     api_key="abc-123-def-456",
+        ...     user=UserPublic(...),
+        ...     message="Successfully authenticated"
+        ... )
+    """
+    success: bool
+    api_key: str = Field(..., description="API authentication key")
+    user: UserPublic
+    message: str = Field(default="Successfully authenticated")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "api_key": "550e8400-e29b-41d4-a716-446655440000",
+                "user": {
+                    "id": 1,
+                    "github_id": 12345678,
+                    "username": "parkj",
+                    "email": "parkj@example.com",
+                    "name": "Park J",
+                    "created_at": "2024-01-01T00:00:00",
+                    "last_login": "2024-01-02T12:00:00"
+                },
+                "message": "Successfully authenticated"
+            }
+        }
 
 
 # ============================================================================

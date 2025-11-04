@@ -76,9 +76,13 @@ async def generate_embedding(text: str) -> Optional[List[float]]:
 
 async def upsert_embeddings(
     collection: str,
-    documents: List[Dict[str, Any]]
+    documents: List[Dict[str, Any]],
+    user_id: int
 ) -> int:
     """Upsert document embeddings to vector database.
+    
+    다중 사용자 지원: user_id로 데이터를 격리합니다.
+    각 문서의 ID는 md5(user_id + file_path)로 생성되어 사용자별로 고유합니다.
     
     Args:
         collection: Collection name
@@ -87,6 +91,7 @@ async def upsert_embeddings(
             - file: 파일 경로
             - content: 파일 내용
             - status: optional (added/modified/deleted)
+        user_id: 사용자 ID (데이터 격리용)
         
     Returns:
         Number of embeddings upserted
@@ -111,9 +116,10 @@ async def upsert_embeddings(
         
         for doc in documents:
             try:
-                # 1. 파일 경로 → 고유 ID (해시)
+                # 1. 파일 경로 → 고유 ID (user_id + 파일 경로 해시)
                 file_path = doc["file"]
-                file_id = hashlib.md5(file_path.encode()).hexdigest()
+                # 사용자별로 고유한 ID 생성
+                file_id = hashlib.md5(f"{user_id}:{file_path}".encode()).hexdigest()
                 
                 # 2. 내용 → 임베딩 벡터
                 content = doc.get("content", "")
@@ -126,11 +132,12 @@ async def upsert_embeddings(
                     logger.warning(f"Failed to generate embedding for {file_path}")
                     continue
                 
-                # 3. Point 생성
+                # 3. Point 생성 (payload에 user_id 포함)
                 points.append(PointStruct(
                     id=file_id,
                     vector=embedding,
                     payload={
+                        "user_id": user_id,  # 사용자 ID 추가
                         "file": file_path,
                         "content_preview": content[:500],  # 미리보기
                         "content_length": len(content),
@@ -164,9 +171,21 @@ async def upsert_embeddings(
 
 async def delete_embeddings(
     collection: str,
-    file_paths: List[str]
+    file_paths: List[str],
+    user_id: int
 ) -> int:
-    """Vector DB에서 파일 삭제"""
+    """Vector DB에서 파일 삭제.
+    
+    다중 사용자 지원: user_id를 사용하여 해당 사용자의 파일만 삭제합니다.
+    
+    Args:
+        collection: Collection name
+        file_paths: 삭제할 파일 경로 리스트
+        user_id: 사용자 ID
+        
+    Returns:
+        삭제된 파일 수
+    """
     if not file_paths:
         return 0
     
@@ -179,9 +198,9 @@ async def delete_embeddings(
         return len(file_paths)
     
     try:
-        # 파일 경로 → ID 변환
+        # 파일 경로 → ID 변환 (user_id 포함)
         point_ids = [
-            hashlib.md5(path.encode()).hexdigest()
+            hashlib.md5(f"{user_id}:{path}".encode()).hexdigest()
             for path in file_paths
         ]
         
@@ -200,21 +219,44 @@ async def delete_embeddings(
         raise
 
 
-async def list_all_files(collection: str) -> Dict[str, Dict[str, Any]]:
-    """Vector DB에 인덱싱된 모든 파일 목록 조회"""
+async def list_all_files(collection: str, user_id: int) -> Dict[str, Dict[str, Any]]:
+    """Vector DB에 인덱싱된 사용자의 파일 목록 조회.
+    
+    다중 사용자 지원: user_id로 필터링하여 해당 사용자의 파일만 반환합니다.
+    
+    Args:
+        collection: Collection name
+        user_id: 사용자 ID
+        
+    Returns:
+        파일 경로를 키로 하는 파일 정보 딕셔너리
+    """
     client = await get_qdrant_client()
     
     if client is None:
         return {}
     
     try:
-        # 모든 포인트 조회 (페이지네이션)
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        
+        # 사용자 ID로 필터링하여 조회 (페이지네이션)
         all_files = {}
         offset = None
+        
+        # user_id 필터
+        user_filter = Filter(
+            must=[
+                FieldCondition(
+                    key="user_id",
+                    match=MatchValue(value=user_id)
+                )
+            ]
+        )
         
         while True:
             result = await client.scroll(
                 collection_name=collection,
+                scroll_filter=user_filter,  # user_id 필터 적용
                 limit=100,
                 offset=offset,
                 with_payload=True,
@@ -225,11 +267,13 @@ async def list_all_files(collection: str) -> Dict[str, Dict[str, Any]]:
             
             for point in points:
                 payload = point.payload
-                all_files[payload["file"]] = {
-                    "hash": payload.get("hash"),
-                    "size": payload.get("content_length"),
-                    "updated_at": payload.get("updated_at")
-                }
+                # user_id가 일치하는 파일만 포함 (이중 확인)
+                if payload.get("user_id") == user_id:
+                    all_files[payload["file"]] = {
+                        "hash": payload.get("hash"),
+                        "size": payload.get("content_length"),
+                        "updated_at": payload.get("updated_at")
+                    }
             
             if next_offset is None:
                 break

@@ -108,14 +108,16 @@ def parse_python_file(file_path: str, content: str) -> Dict[str, Any]:
         return {"file": file_path, "entities": [], "imports": []}
 
 
-async def update_code_graph(files: List[str], contents: Optional[Dict[str, str]] = None) -> int:
+async def update_code_graph(files: List[str], contents: Optional[Dict[str, str]] = None, user_id: int = 0) -> int:
     """Update code graph with file changes.
     
     Creates/updates nodes and relationships for code entities.
+    다중 사용자 지원: 모든 노드에 user_id 속성을 추가하여 데이터를 격리합니다.
     
     Args:
         files: List of file paths that changed
         contents: Optional dict of {file_path: file_content}
+        user_id: 사용자 ID (데이터 격리용, 기본값 0은 레거시 데이터용)
         
     Returns:
         Number of graph nodes updated
@@ -139,11 +141,13 @@ async def update_code_graph(files: List[str], contents: Optional[Dict[str, str]]
             for file_path in files:
                 try:
                     # 1. 파일 노드 생성/업데이트 (MERGE = Upsert)
+                    # user_id를 포함하여 사용자별로 고유한 노드 생성
                     await session.run("""
-                        MERGE (f:File {path: $path})
+                        MERGE (f:File {path: $path, user_id: $user_id})
                         SET f.updated_at = $updated_at
                         """,
                         path=file_path,
+                        user_id=user_id,
                         updated_at=datetime.now().isoformat()
                     )
                     nodes_updated += 1
@@ -159,7 +163,7 @@ async def update_code_graph(files: List[str], contents: Optional[Dict[str, str]]
                             # 3. 엔티티 (함수/클래스) 노드 생성
                             for entity in parsed["entities"]:
                                 await session.run("""
-                                    MERGE (e:Entity {name: $name, file: $file})
+                                    MERGE (e:Entity {name: $name, file: $file, user_id: $user_id})
                                     SET e.type = $type,
                                         e.line_start = $line_start,
                                         e.line_end = $line_end,
@@ -167,44 +171,48 @@ async def update_code_graph(files: List[str], contents: Optional[Dict[str, str]]
                                     """,
                                     name=entity["name"],
                                     file=file_path,
+                                    user_id=user_id,
                                     type=entity["type"],
                                     line_start=entity["line_start"],
                                     line_end=entity["line_end"],
                                     updated_at=datetime.now().isoformat()
                                 )
                                 
-                                # 4. 파일 → 엔티티 관계
+                                # 4. 파일 → 엔티티 관계 (user_id로 필터링)
                                 await session.run("""
-                                    MATCH (f:File {path: $file})
-                                    MATCH (e:Entity {name: $name, file: $file})
+                                    MATCH (f:File {path: $file, user_id: $user_id})
+                                    MATCH (e:Entity {name: $name, file: $file, user_id: $user_id})
                                     MERGE (f)-[:CONTAINS]->(e)
                                     """,
                                     file=file_path,
+                                    user_id=user_id,
                                     name=entity["name"]
                                 )
                                 
-                                # 5. 함수 호출 관계
+                                # 5. 함수 호출 관계 (user_id로 필터링)
                                 if entity["type"] == "function":
                                     for called in entity.get("calls", []):
                                         # 같은 파일 내 함수 호출만 연결 (단순화)
                                         await session.run("""
-                                            MATCH (caller:Entity {name: $caller, file: $file})
-                                            MATCH (callee:Entity {name: $callee, file: $file})
+                                            MATCH (caller:Entity {name: $caller, file: $file, user_id: $user_id})
+                                            MATCH (callee:Entity {name: $callee, file: $file, user_id: $user_id})
                                             MERGE (caller)-[:CALLS]->(callee)
                                             """,
                                             caller=entity["name"],
                                             callee=called,
-                                            file=file_path
+                                            file=file_path,
+                                            user_id=user_id
                                         )
                             
-                            # 6. Import 관계
+                            # 6. Import 관계 (user_id로 필터링)
                             for imported in parsed["imports"]:
                                 await session.run("""
-                                    MATCH (f:File {path: $file})
-                                    MERGE (m:Module {name: $module})
+                                    MATCH (f:File {path: $file, user_id: $user_id})
+                                    MERGE (m:Module {name: $module, user_id: $user_id})
                                     MERGE (f)-[:IMPORTS]->(m)
                                     """,
                                     file=file_path,
+                                    user_id=user_id,
                                     module=imported
                                 )
                     
@@ -220,8 +228,18 @@ async def update_code_graph(files: List[str], contents: Optional[Dict[str, str]]
         raise
 
 
-async def delete_file_nodes(files: List[str]) -> int:
-    """Graph DB에서 파일 노드 삭제"""
+async def delete_file_nodes(files: List[str], user_id: int = 0) -> int:
+    """Graph DB에서 파일 노드 삭제.
+    
+    다중 사용자 지원: user_id로 필터링하여 해당 사용자의 파일만 삭제합니다.
+    
+    Args:
+        files: 삭제할 파일 경로 리스트
+        user_id: 사용자 ID (기본값 0은 레거시 데이터용)
+        
+    Returns:
+        삭제된 파일 노드 수
+    """
     if not files:
         return 0
     
@@ -236,13 +254,14 @@ async def delete_file_nodes(files: List[str]) -> int:
     try:
         async with driver.session() as session:
             for file_path in files:
-                # 파일 노드와 관련 엔티티 모두 삭제
+                # 파일 노드와 관련 엔티티 모두 삭제 (user_id로 필터링)
                 await session.run("""
-                    MATCH (f:File {path: $path})
-                    OPTIONAL MATCH (f)-[:CONTAINS]->(e:Entity)
+                    MATCH (f:File {path: $path, user_id: $user_id})
+                    OPTIONAL MATCH (f)-[:CONTAINS]->(e:Entity {user_id: $user_id})
                     DETACH DELETE f, e
                     """,
-                    path=file_path
+                    path=file_path,
+                    user_id=user_id
                 )
         
         logger.info(f"Successfully deleted {len(files)} file nodes from Neo4j")
