@@ -77,8 +77,8 @@ def test_execute_with_idempotency_key(client, api_headers):
     }
     
     command_data = {
-        "name": "refresh_rag_indexes",
-        "params": {"full_rebuild": False}
+        "name": "update_code_index",
+        "params": {"files": ["test.py"]}
     }
     
     response = client.post(

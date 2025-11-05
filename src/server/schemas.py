@@ -201,8 +201,7 @@ class CommandExecuteRequest(BaseModel):
     Attributes:
         name: 실행할 툴의 이름
             가능한 값: "post_blog_article", "update_code_index",
-                      "refresh_rag_indexes", "publish_to_notion",
-                      "create_commit_and_push"
+                      "publish_to_notion", "create_commit_and_push"
         params: 툴별 파라미터 딕셔너리
     
     Example:

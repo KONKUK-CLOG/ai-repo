@@ -28,7 +28,6 @@ from typing import Dict, Any, List
 from src.mcp.tools import (
     post_blog_article,
     update_code_index,
-    refresh_rag_indexes,
     publish_to_notion,
     create_commit_and_push
 )
@@ -41,7 +40,6 @@ logger = logging.getLogger(__name__)
 TOOLS = [
     post_blog_article.TOOL,         # 블로그 글 게시
     update_code_index.TOOL,          # 코드 인덱스 업데이트
-    refresh_rag_indexes.TOOL,        # RAG 인덱스 새로고침
     publish_to_notion.TOOL,          # Notion 페이지 게시
     create_commit_and_push.TOOL,     # Git 커밋 및 푸시
 ]
@@ -51,7 +49,6 @@ TOOLS = [
 TOOL_EXECUTORS = {
     "post_blog_article": post_blog_article.run,
     "update_code_index": update_code_index.run,
-    "refresh_rag_indexes": refresh_rag_indexes.run,
     "publish_to_notion": publish_to_notion.run,
     "create_commit_and_push": create_commit_and_push.run,
 }

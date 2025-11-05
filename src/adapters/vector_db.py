@@ -287,6 +287,80 @@ async def list_all_files(collection: str, user_id: int) -> Dict[str, Dict[str, A
         return {}
 
 
+async def semantic_search(
+    collection: str,
+    query: str,
+    user_id: int,
+    top_k: int = 10
+) -> List[Dict[str, Any]]:
+    """Perform semantic search on vector database.
+    
+    사용자 쿼리를 임베딩으로 변환하고 Qdrant에서 유사한 문서를 검색합니다.
+    
+    Args:
+        collection: Collection name
+        query: Search query text
+        user_id: User ID for filtering
+        top_k: Number of top results to return
+        
+    Returns:
+        List of search results with file paths, content, and similarity scores
+    """
+    logger.info(f"Performing semantic search for user {user_id}: {query[:100]}")
+    
+    client = await get_qdrant_client()
+    
+    if client is None:
+        logger.warning("Vector DB client not available. Returning empty results.")
+        return []
+    
+    try:
+        # 1. Generate embedding for query
+        query_embedding = await generate_embedding(query)
+        if query_embedding is None:
+            logger.warning("Failed to generate embedding for query")
+            return []
+        
+        # 2. Search in Qdrant with user_id filter
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        
+        user_filter = Filter(
+            must=[
+                FieldCondition(
+                    key="user_id",
+                    match=MatchValue(value=user_id)
+                )
+            ]
+        )
+        
+        search_result = await client.search(
+            collection_name=collection,
+            query_vector=query_embedding,
+            query_filter=user_filter,
+            limit=top_k,
+            with_payload=True
+        )
+        
+        # 3. Format results
+        results = []
+        for scored_point in search_result:
+            payload = scored_point.payload
+            results.append({
+                "file": payload.get("file", ""),
+                "content": payload.get("content_preview", ""),
+                "score": scored_point.score,
+                "content_length": payload.get("content_length", 0),
+                "updated_at": payload.get("updated_at", "")
+            })
+        
+        logger.info(f"Found {len(results)} relevant documents")
+        return results
+        
+    except Exception as e:
+        logger.error(f"Failed to perform semantic search: {e}")
+        return []
+
+
 async def refresh_all_indexes() -> Dict[str, Any]:
     """Refresh all vector indexes.
     

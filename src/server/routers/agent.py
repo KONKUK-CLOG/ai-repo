@@ -12,7 +12,6 @@ from openai import AsyncOpenAI
 from src.mcp.tools import (
     post_blog_article,
     update_code_index,
-    refresh_rag_indexes,
     publish_to_notion,
     create_commit_and_push
 )
@@ -31,14 +30,13 @@ logger = logging.getLogger(__name__)
 TOOLS_REGISTRY = {
     "post_blog_article": post_blog_article,           # 블로그 글 발행
     "update_code_index": update_code_index,           # 코드 인덱스 업데이트
-    "refresh_rag_indexes": refresh_rag_indexes,       # RAG 인덱스 리프레시
     "publish_to_notion": publish_to_notion,           # Notion 페이지 발행
     "create_commit_and_push": create_commit_and_push, # Git 커밋 & 푸시
 }
 
 
-async def execute_tool_by_name(tool_name: str, params: dict) -> dict:
-    """Execute a tool by name with given parameters.
+async def _execute_regular_tool(tool_name: str, params: dict) -> dict:
+    """Execute a regular tool by name with given parameters.
     
     Args:
         tool_name: Name of the tool to execute
@@ -58,6 +56,183 @@ async def execute_tool_by_name(tool_name: str, params: dict) -> dict:
         raise ValueError(f"Tool '{tool_name}' has no run method")
     
     return await tool_module.run(params)
+
+
+def _calculate_dynamic_top_k(max_tokens: int) -> int:
+    """Calculate optimal top_k based on LLM max_tokens setting.
+    
+    Args:
+        max_tokens: Maximum tokens for LLM
+        
+    Returns:
+        Optimal number of documents to retrieve
+    """
+    # Rough estimation: 
+    # - Each code file ~500 tokens on average
+    # - Reserve 50% of context for prompt + response
+    available_tokens = max_tokens * 0.5
+    top_k = int(available_tokens / 500)
+    
+    # Clamp between 3 and 30
+    return max(3, min(30, top_k))
+
+
+async def _execute_blog_article_with_rag(
+    prompt: str,
+    params: dict,
+    user: User,
+    model: str = None
+) -> dict:
+    """Execute blog article posting with RAG-enhanced content generation.
+    
+    이 함수는 2단계 추론을 수행합니다:
+    1. RAG로 관련 코드베이스 검색
+    2. LLM이 검색 결과를 바탕으로 블로그 글 생성
+    
+    Args:
+        prompt: User's original prompt
+        params: Tool parameters (may contain partial info)
+        user: Authenticated user
+        model: LLM model to use
+        
+    Returns:
+        Blog article publication result
+    """
+    from src.adapters import vector_db
+    
+    logger.info(f"Executing blog article with RAG for prompt: {prompt}")
+    
+    # 1. Calculate optimal top_k and split between DBs
+    max_tokens = settings.LLM_MAX_TOKENS
+    total_top_k = _calculate_dynamic_top_k(max_tokens)
+    
+    # Split top_k: 70% for Vector DB (code content), 30% for Graph DB (structure)
+    vector_top_k = max(3, int(total_top_k * 0.7))  # At least 3
+    graph_top_k = max(2, int(total_top_k * 0.3))   # At least 2
+    
+    logger.info(f"Allocating top_k - Total: {total_top_k}, Vector: {vector_top_k}, Graph: {graph_top_k}")
+    
+    # 2. Perform RAG search using user's prompt
+    # 2-1. Vector DB: Semantic search (priority - full code content)
+    vector_results = await vector_db.semantic_search(
+        collection=settings.VECTOR_DB_COLLECTION,
+        query=prompt,
+        user_id=user.id,
+        top_k=vector_top_k
+    )
+    logger.info(f"Vector DB search returned {len(vector_results)} documents")
+    
+    # 2-2. Track files from Vector DB to avoid duplicates
+    vector_files = {result['file'] for result in vector_results}
+    
+    # 2-3. Graph DB: Related code entities search
+    from src.adapters import graph_db
+    graph_results_raw = await graph_db.search_related_code(
+        query=prompt,
+        user_id=user.id,
+        limit=graph_top_k * 3  # Get more to compensate for filtering
+    )
+    
+    # 2-4. Filter out files already in Vector DB results (deduplication)
+    graph_results = [
+        r for r in graph_results_raw 
+        if r['file'] not in vector_files
+    ][:graph_top_k]  # Limit to graph_top_k
+    
+    logger.info(f"Graph DB search returned {len(graph_results_raw)} entities, "
+                f"{len(graph_results)} unique after deduplication")
+    
+    # 3. Format RAG results for LLM context
+    rag_context = []
+    
+    # 3-1. Vector DB results: Full code content (핵심 코드)
+    if vector_results:
+        rag_context.append("## 📄 핵심 코드 (의미적 유사도)\n")
+        for idx, result in enumerate(vector_results, 1):
+            rag_context.append(
+                f"**{idx}. {result['file']}** (유사도: {result['score']:.3f})\n"
+                f"```\n{result['content']}\n```\n"
+            )
+    
+    # 3-2. Graph DB results: Concise entity descriptions (추가 관련 엔티티)
+    if graph_results:
+        rag_context.append("\n## 🔗 추가 관련 코드 엔티티\n")
+        for result in graph_results:
+            calls_info = ""
+            if result.get("calls"):
+                calls_list = ', '.join(result['calls'][:3])
+                calls_info = f" (calls: {calls_list})"
+            
+            # Single-line format for efficiency
+            rag_context.append(
+                f"- **{result['file']}**: `{result['entity_name']}` "
+                f"({result['entity_type']}){calls_info}\n"
+            )
+    
+    rag_context_str = "\n".join(rag_context) if rag_context else "관련 코드를 찾을 수 없습니다."
+    
+    # 4. Call LLM to generate blog content
+    if not settings.OPENAI_API_KEY:
+        # Fallback: use simple content generation
+        return await post_blog_article.run({
+            "title": params.get("title", "자동 생성된 글"),
+            "markdown": params.get("markdown", f"# 코드 변경 요약\n\n{prompt}"),
+            "tags": params.get("tags", [])
+        })
+    
+    try:
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        
+        system_prompt = """당신은 기술 블로그 작성자입니다. 
+제공된 코드베이스 정보를 바탕으로 정확하고 유익한 기술 블로그 글을 작성하세요.
+
+요구사항:
+- 제목과 본문을 markdown 형식으로 작성
+- 코드 예제를 적절히 활용
+- 기술적 정확성 유지
+- 독자가 이해하기 쉽게 설명
+- JSON 형식으로 응답: {"title": "...", "markdown": "..."}"""
+
+        user_message = f"""사용자 요청: {prompt}
+
+관련 코드베이스:
+{rag_context_str}
+
+위 정보를 바탕으로 블로그 글을 작성해주세요. 
+제목과 마크다운 본문을 JSON 형식으로 반환해주세요."""
+
+        response = await client.chat.completions.create(
+            model=model or settings.DEFAULT_LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            temperature=0.7,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"}
+        )
+        
+        content = response.choices[0].message.content
+        blog_data = json.loads(content)
+        
+        # 5. Publish blog article with generated content
+        result = await post_blog_article.run({
+            "title": blog_data.get("title", params.get("title", "자동 생성된 글")),
+            "markdown": blog_data.get("markdown", params.get("markdown", "")),
+            "tags": params.get("tags", [])
+        })
+        
+        logger.info(f"Successfully published blog article with RAG")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Failed to generate blog content with LLM: {e}")
+        # Fallback to simple generation
+        return await post_blog_article.run({
+            "title": params.get("title", "자동 생성된 글"),
+            "markdown": params.get("markdown", f"# {prompt}\n\n관련 코드:\n{rag_context_str}"),
+            "tags": params.get("tags", [])
+        })
 
 
 async def call_llm_with_tools(
@@ -99,7 +274,6 @@ async def call_llm_with_tools(
 사용 가능한 툴:
 - post_blog_article: 블로그에 글 발행
 - update_code_index: 코드 변경사항을 벡터/그래프 인덱스에 반영
-- refresh_rag_indexes: RAG 인덱스 전체 리프레시
 - publish_to_notion: Notion에 페이지 발행
 - create_commit_and_push: Git 커밋 후 푸시
 
@@ -222,12 +396,9 @@ def _fallback_tool_selection(prompt: str, context: dict) -> tuple[str, list[dict
             }
         })
     
-    # 아무 툴도 선택되지 않은 경우 기본 응답
+    # 아무 툴도 선택되지 않은 경우
     if not tool_calls:
-        tool_calls.append({
-            "tool": "refresh_rag_indexes",
-            "params": {"full_rebuild": False}
-        })
+        thought = "요청을 처리할 적절한 툴을 찾지 못했습니다. 구체적인 작업을 명시해주세요."
     
     return thought, tool_calls
 
@@ -281,7 +452,19 @@ async def execute_llm_command(
             params = tool_call_plan["params"]
             
             try:
-                result = await execute_tool_by_name(tool_name, params)
+                # 블로그 글 작성은 RAG를 사용한 2단계 추론
+                if tool_name == "post_blog_article":
+                    logger.info("Using RAG-enhanced execution for blog article")
+                    result = await _execute_blog_article_with_rag(
+                        prompt=request.prompt,
+                        params=params,
+                        user=user,
+                        model=request.model
+                    )
+                else:
+                    # 다른 툴들은 일반 실행
+                    result = await _execute_regular_tool(tool_name, params)
+                
                 executed_tool_calls.append(ToolCall(
                     tool=tool_name,
                     params=params,

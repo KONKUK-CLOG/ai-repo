@@ -72,7 +72,6 @@ ts-llm-mcp-bridge/
 │     └─ tools/          # MCP 툴들
 │        ├─ post_blog_article.py
 │        ├─ update_code_index.py
-│        ├─ refresh_rag_indexes.py
 │        ├─ publish_to_notion.py
 │        └─ create_commit_and_push.py
 ├─ data/                 # 데이터 파일 (git ignored)
@@ -585,9 +584,8 @@ MCP 클라이언트가 stdin/stdout으로 JSON-RPC 메시지를 교환할 수 �
 
 1. **post_blog_article** - 블로그 글 발행
 2. **update_code_index** - 코드 인덱스 증분 업데이트
-3. **refresh_rag_indexes** - RAG 인덱스 전역 리프레시
-4. **publish_to_notion** - Notion 페이지 발행
-5. **create_commit_and_push** - Git 커밋 & 푸시
+3. **publish_to_notion** - Notion 페이지 발행
+4. **create_commit_and_push** - Git 커밋 & 푸시
 
 ## 백그라운드 작업
 
@@ -759,6 +757,8 @@ LIMIT 10;
 
 ## 🚧 향후 계획
 
+- [ ] TypeScript 클라이언트(VSCode Extension) 연결
+- [ ] 실제 블로그 API 연동 (현재 더미 구현)
 - [ ] 성능 최적화 및 모니터링
 - [ ] 프로덕션 배포 가이드
 - [ ] 사용자 관리 대시보드

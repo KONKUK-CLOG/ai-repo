@@ -272,6 +272,106 @@ async def delete_file_nodes(files: List[str], user_id: int = 0) -> int:
         raise
 
 
+async def search_related_code(
+    query: str,
+    user_id: int,
+    limit: int = 10
+) -> List[Dict[str, Any]]:
+    """Search for related code entities and their relationships in graph DB.
+    
+    사용자의 쿼리를 바탕으로 관련된 코드 엔티티(함수, 클래스)와 파일을 검색합니다.
+    키워드 매칭 및 관계 기반 검색을 수행합니다.
+    
+    Args:
+        query: Search query (keywords to match against entity names)
+        user_id: User ID for filtering
+        limit: Maximum number of results to return
+        
+    Returns:
+        List of related code entities with their relationships
+    """
+    logger.info(f"Searching graph DB for user {user_id}: {query[:100]}")
+    
+    driver = await get_neo4j_driver()
+    
+    if driver is None:
+        logger.warning("Graph DB driver not available. Returning empty results.")
+        return []
+    
+    try:
+        # Extract keywords from query (simple tokenization)
+        keywords = [word.lower() for word in query.split() if len(word) > 2]
+        if not keywords:
+            return []
+        
+        results = []
+        
+        async with driver.session() as session:
+            # Search for entities matching keywords
+            for keyword in keywords[:5]:  # Limit to first 5 keywords
+                # Use case-insensitive regex matching
+                cypher_query = """
+                MATCH (e:Entity {user_id: $user_id})
+                WHERE toLower(e.name) CONTAINS toLower($keyword)
+                OPTIONAL MATCH (f:File {user_id: $user_id})-[:CONTAINS]->(e)
+                OPTIONAL MATCH (e)-[r:CALLS]->(called:Entity {user_id: $user_id})
+                RETURN e.name as entity_name,
+                       e.type as entity_type,
+                       e.line_start as line_start,
+                       e.line_end as line_end,
+                       f.path as file_path,
+                       collect(DISTINCT called.name) as calls
+                LIMIT $limit
+                """
+                
+                result = await session.run(
+                    cypher_query,
+                    user_id=user_id,
+                    keyword=keyword,
+                    limit=limit
+                )
+                
+                async for record in result:
+                    entity_name = record["entity_name"]
+                    entity_type = record["entity_type"]
+                    file_path = record["file_path"]
+                    line_start = record["line_start"]
+                    line_end = record["line_end"]
+                    calls = record["calls"] or []
+                    
+                    # Build description
+                    description = f"{entity_type.capitalize()}: {entity_name}"
+                    if calls:
+                        description += f" (calls: {', '.join(calls[:3])})"
+                    
+                    results.append({
+                        "file": file_path or "unknown",
+                        "entity_name": entity_name,
+                        "entity_type": entity_type,
+                        "line_start": line_start,
+                        "line_end": line_end,
+                        "calls": calls,
+                        "description": description,
+                        "keyword_matched": keyword
+                    })
+        
+        # Deduplicate results
+        seen = set()
+        unique_results = []
+        for result in results:
+            key = (result["file"], result["entity_name"])
+            if key not in seen:
+                seen.add(key)
+                unique_results.append(result)
+        
+        logger.info(f"Found {len(unique_results)} related code entities in graph DB")
+        return unique_results[:limit]
+        
+    except Exception as e:
+        logger.error(f"Failed to search graph DB: {e}")
+        return []
+
+
 async def refresh_graph_indexes() -> Dict[str, Any]:
     """Refresh graph database indexes.
     
