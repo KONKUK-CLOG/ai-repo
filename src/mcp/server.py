@@ -27,7 +27,6 @@ import logging
 from typing import Dict, Any, List
 from src.mcp.tools import (
     post_blog_article,
-    update_code_index,
     publish_to_notion,
     create_commit_and_push
 )
@@ -39,7 +38,6 @@ logger = logging.getLogger(__name__)
 # 각 도구는 TOOL(메타데이터)과 run(실행 함수)를 제공
 TOOLS = [
     post_blog_article.TOOL,         # 블로그 글 게시
-    update_code_index.TOOL,          # 코드 인덱스 업데이트
     publish_to_notion.TOOL,          # Notion 페이지 게시
     create_commit_and_push.TOOL,     # Git 커밋 및 푸시
 ]
@@ -48,7 +46,6 @@ TOOLS = [
 # tool_name → async run(arguments) 함수
 TOOL_EXECUTORS = {
     "post_blog_article": post_blog_article.run,
-    "update_code_index": update_code_index.run,
     "publish_to_notion": publish_to_notion.run,
     "create_commit_and_push": create_commit_and_push.run,
 }

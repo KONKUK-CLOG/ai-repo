@@ -11,7 +11,6 @@ from src.server.settings import settings
 from openai import AsyncOpenAI
 from src.mcp.tools import (
     post_blog_article,
-    update_code_index,
     publish_to_notion,
     create_commit_and_push
 )
@@ -29,7 +28,6 @@ logger = logging.getLogger(__name__)
 # agent.py와 commands.py에서 공유하여 사용
 TOOLS_REGISTRY = {
     "post_blog_article": post_blog_article,           # 블로그 글 발행
-    "update_code_index": update_code_index,           # 코드 인덱스 업데이트
     "publish_to_notion": publish_to_notion,           # Notion 페이지 발행
     "create_commit_and_push": create_commit_and_push, # Git 커밋 & 푸시
 }
@@ -273,9 +271,10 @@ async def call_llm_with_tools(
 
 사용 가능한 툴:
 - post_blog_article: 블로그에 글 발행
-- update_code_index: 코드 변경사항을 벡터/그래프 인덱스에 반영
 - publish_to_notion: Notion에 페이지 발행
 - create_commit_and_push: Git 커밋 후 푸시
+
+참고: 코드 인덱스 업데이트는 클라이언트(VSCode Extension)가 /api/v1/diffs/apply를 통해 자동으로 처리합니다.
 
 컨텍스트에 있는 정보를 최대한 활용하여 적절한 파라미터를 구성하세요."""
     
@@ -359,15 +358,6 @@ def _fallback_tool_selection(prompt: str, context: dict) -> tuple[str, list[dict
     prompt_lower = prompt.lower()
     
     # 키워드 기반 더미 로직
-    if "인덱스" in prompt_lower or "index" in prompt_lower:
-        if "diff" in context or "files" in context:
-            tool_calls.append({
-                "tool": "update_code_index",
-                "params": {
-                    "files": context.get("diff", {}).get("files", [])
-                }
-            })
-    
     if "블로그" in prompt_lower or "blog" in prompt_lower or "글" in prompt_lower:
         tool_calls.append({
             "tool": "post_blog_article",

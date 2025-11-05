@@ -200,8 +200,8 @@ class CommandExecuteRequest(BaseModel):
     
     Attributes:
         name: 실행할 툴의 이름
-            가능한 값: "post_blog_article", "update_code_index",
-                      "publish_to_notion", "create_commit_and_push"
+            가능한 값: "post_blog_article", "publish_to_notion",
+                      "create_commit_and_push"
         params: 툴별 파라미터 딕셔너리
     
     Example:
@@ -238,7 +238,8 @@ class CommandExecuteResult(BaseModel):
         tool: 실행된 툴의 이름
         result: 툴 실행 결과 (툴마다 다른 형식)
             - post_blog_article: {"success": True, "article": {...}}
-            - update_code_index: {"success": True, "files_processed": 2, ...}
+            - publish_to_notion: {"success": True, "page_id": "..."}
+            - create_commit_and_push: {"success": True, "commit_sha": "..."}
             - 등등
     
     Example:
@@ -298,7 +299,7 @@ class CommandsListResponse(BaseModel):
         >>> response = CommandsListResponse(
         ...     tools=[
         ...         ToolSchema(name="post_blog_article", ...),
-        ...         ToolSchema(name="update_code_index", ...)
+        ...         ToolSchema(name="publish_to_notion", ...)
         ...     ]
         ... )
     """
@@ -406,12 +407,12 @@ class LLMExecuteResult(BaseModel):
     Example:
         >>> result = LLMExecuteResult(
         ...     ok=True,
-        ...     thought="사용자가 코드 인덱싱과 블로그 발행을 요청했음",
+        ...     thought="사용자가 블로그 발행과 Notion 페이지 발행을 요청했음",
         ...     tool_calls=[
-        ...         ToolCall(tool="update_code_index", ...),
-        ...         ToolCall(tool="post_blog_article", ...)
+        ...         ToolCall(tool="post_blog_article", ...),
+        ...         ToolCall(tool="publish_to_notion", ...)
         ...     ],
-        ...     final_response="코드 인덱스를 업데이트하고 블로그 글을 발행했습니다.",
+        ...     final_response="블로그 글을 발행하고 Notion 페이지를 발행했습니다.",
         ...     model_used="claude-3-5-sonnet"
         ... )
     """

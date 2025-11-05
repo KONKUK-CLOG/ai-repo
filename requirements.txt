@@ -5,7 +5,8 @@ pydantic-settings==2.1.0
 httpx==0.25.2
 pytest==7.4.3
 pytest-asyncio==0.21.1
-anyio==4.1.0
+pytest-cov==4.1.0
+anyio==3.7.1
 python-multipart==0.0.6
 openai==1.54.0
 qdrant-client==1.7.0

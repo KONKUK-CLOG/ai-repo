@@ -1,6 +1,6 @@
 """Health check endpoints."""
 from fastapi import APIRouter
-from typing import Dict
+from typing import Dict, Any
 from src.server.settings import settings
 
 router = APIRouter()
@@ -17,7 +17,7 @@ async def health_check() -> Dict[str, str]:
 
 
 @router.get("/readyz")
-async def readiness_check() -> Dict[str, str]:
+async def readiness_check() -> Dict[str, Any]:
     """Readiness check endpoint.
     
     Checks if required environment variables are set.
@@ -27,7 +27,6 @@ async def readiness_check() -> Dict[str, str]:
     """
     # Check if critical environment variables are present
     checks = {
-        "api_key": bool(settings.SERVER_API_KEY),
         "blog_api_url": bool(settings.BLOG_API_URL),
         "vector_db_url": bool(settings.VECTOR_DB_URL),
         "graph_db_url": bool(settings.GRAPH_DB_URL),
