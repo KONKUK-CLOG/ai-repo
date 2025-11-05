@@ -55,7 +55,8 @@ class WriteAheadLog:
             log_id = f"{datetime.now().timestamp()}".replace(".", "_")
             
             # Content를 별도 파일로 저장
-            content = operation.get("content", "")
+            # operation["content"]가 None일 수 있으므로 안전하게 처리
+            content = operation.get("content") or ""
             content_file_path = None
             
             if content:
