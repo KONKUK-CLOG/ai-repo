@@ -10,6 +10,7 @@
 """
 import pytest
 from unittest.mock import patch, AsyncMock
+from src.models.user import User
 
 
 def test_github_login_redirect(client):
@@ -27,17 +28,12 @@ def test_github_login_redirect(client):
     - 테스트 환경에서는 GITHUB_CLIENT_ID가 없을 수 있음
     - 500 에러도 정상적인 동작으로 간주
     """
-    # When: GitHub 로그인 엔드포인트 호출
-    response = client.get("/auth/github/login")
+    # When: GitHub 로그인 엔드포인트 호출 (외부 URL로는 따라가지 않음)
+    response = client.get("/auth/github/login", allow_redirects=False)
     
-    # Then: 리다이렉트 또는 설정 오류
-    # GitHub OAuth가 설정되어 있으면 리다이렉트, 없으면 500 에러
-    if response.status_code in [302, 307]:
-        # 리다이렉트 성공
-        assert "github.com" in response.headers.get("location", "")
-    else:
-        # GitHub OAuth 미설정 시 500 에러
-        assert response.status_code == 500
+    # Then: 리다이렉트 응답 및 Location 헤더 검증
+    assert response.status_code in [302, 307]
+    assert "github.com" in response.headers.get("location", "")
 
 
 def test_github_callback_success(client, mock_user_repo, mock_github_api):
@@ -99,16 +95,17 @@ def test_github_callback_creates_new_user(client, mock_github_api):
     - API 키가 응답에 포함
     """
     # Given: 새 사용자 (DB에 없음)
-    with patch('src.repositories.user_repo.UserRepository') as MockRepo:
-        mock_repo_instance = MockRepo.return_value
-        mock_repo_instance.get_user_by_github_id = AsyncMock(return_value=None)
-        mock_repo_instance.create_user = AsyncMock(return_value={
-            "id": 1,
-            "github_id": 12345678,
-            "username": "testuser",
-            "email": "testuser@example.com",
-            "api_key": "new-test-key"
-        })
+    # Patch the global user_repo instance used by the auth router
+    with patch('src.server.routers.auth.user_repo') as mock_repo:
+        # Simulate user creation via upsert (returns a User object)
+        mock_repo.upsert = AsyncMock(return_value=User(
+            id=1,
+            github_id=12345678,
+            username="testuser",
+            email="testuser@example.com",
+            name=None,
+            api_key="new-test-key"
+        ))
         
         # When: GitHub 콜백 호출
         response = client.get("/auth/github/callback?code=test_code")
@@ -153,7 +150,8 @@ def test_invalid_api_key(client, mock_tools):
     """
     # Given: 유효하지 않은 API 키
     with patch('src.server.deps.user_repo') as mock_repo:
-        mock_repo.get_user_by_api_key = AsyncMock(return_value=None)
+        # get_current_user awaits get_by_api_key; ensure it's AsyncMock
+        mock_repo.get_by_api_key = AsyncMock(return_value=None)
         
         # When: 유효하지 않은 API 키로 요청
         response = client.post(

@@ -119,10 +119,28 @@ def mock_user_repo(mock_user):
         - 모든 메서드가 mock_user 반환
     """
     with patch('src.server.deps.user_repo') as mock_repo:
-        mock_repo.get_user_by_api_key = AsyncMock(return_value=mock_user)
-        mock_repo.get_user_by_github_id = AsyncMock(return_value=mock_user)
-        mock_repo.create_user = AsyncMock(return_value=mock_user)
+        # Align mocked methods with actual repository API used in code
+        mock_repo.get_by_api_key = AsyncMock(return_value=mock_user)
+        mock_repo.get_by_github_id = AsyncMock(return_value=mock_user)
+        mock_repo.create = AsyncMock(return_value=mock_user)
+        mock_repo.upsert = AsyncMock(return_value=mock_user)
+        mock_repo.update_last_login = AsyncMock(return_value=None)
+        # Backward-compatible aliases for older test names
+        mock_repo.get_user_by_api_key = mock_repo.get_by_api_key
+        mock_repo.get_user_by_github_id = mock_repo.get_by_github_id
+        mock_repo.create_user = mock_repo.create
         yield mock_repo
+
+
+@pytest.fixture(autouse=True)
+def _set_github_oauth_settings():
+    """Ensure GitHub OAuth settings are present in test env.
+    Prevents 500 on /auth/github/* due to missing credentials.
+    """
+    from src.server.settings import settings
+    settings.GITHUB_CLIENT_ID = settings.GITHUB_CLIENT_ID or "test_client_id"
+    settings.GITHUB_CLIENT_SECRET = settings.GITHUB_CLIENT_SECRET or "test_client_secret"
+    settings.GITHUB_REDIRECT_URI = settings.GITHUB_REDIRECT_URI or "http://localhost:8000/auth/github/callback"
 
 
 @pytest.fixture
