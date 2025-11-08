@@ -28,7 +28,9 @@ from typing import Dict, Any, List
 from src.mcp.tools import (
     post_blog_article,
     publish_to_notion,
-    create_commit_and_push
+    create_commit_and_push,
+    search_vector_db,
+    search_graph_db
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +42,8 @@ TOOLS = [
     post_blog_article.TOOL,         # 블로그 글 게시
     publish_to_notion.TOOL,          # Notion 페이지 게시
     create_commit_and_push.TOOL,     # Git 커밋 및 푸시
+    search_vector_db.TOOL,           # Vector DB 의미론적 검색
+    search_graph_db.TOOL,            # Graph DB 구조적 검색
 ]
 
 # Tool executors (도구 실행 함수 매핑)
@@ -48,6 +52,8 @@ TOOL_EXECUTORS = {
     "post_blog_article": post_blog_article.run,
     "publish_to_notion": publish_to_notion.run,
     "create_commit_and_push": create_commit_and_push.run,
+    "search_vector_db": search_vector_db.run,
+    "search_graph_db": search_graph_db.run,
 }
 
 
