@@ -40,11 +40,16 @@ async def run(params: Dict[str, Any]) -> Dict[str, Any]:
     title = params.get("title")
     markdown = params.get("markdown")
     tags = params.get("tags", [])
-    
+    api_key = params.get("api_key")
+
+    if not api_key:
+        raise ValueError("api_key is required to publish a blog article")
+
     result = await blog_api.publish_article(
         title=title,
         markdown=markdown,
-        tags=tags
+        tags=tags,
+        api_key=api_key,
     )
     
     return {

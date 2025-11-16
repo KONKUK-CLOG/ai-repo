@@ -111,29 +111,13 @@ def test_apply_diff_files_mode(client, api_headers, mock_user_repo, mock_qdrant_
     assert "stats" in data
 
 
-def test_apply_diff_without_api_key(client):
-    """API 키 없이 diff 적용 시도를 테스트.
-    
-    Given: API 키가 제공되지 않고
-    When: diff를 적용하려 하면
-    Then: 422 Unprocessable Entity 에러가 반환되어야 함
-    
-    검증사항:
-    - HTTP 422 응답 (필수 헤더 누락)
-    
-    설명:
-    - diff 적용은 사용자별 데이터를 변경하므로 인증 필수
-    - API 키를 통해 사용자 식별
-    - FastAPI는 필수 Depends 파라미터 누락 시 422를 반환
-    - 401은 API 키가 잘못된 경우에 반환
-    """
-    # When: API 키 없이 요청
+def test_apply_diff_without_authorization(client):
+    """API 키 없이 diff 적용 시도를 테스트."""
     response = client.post(
         "/api/v1/diffs/apply",
         json={"files": []}
     )
     
-    # Then: 422 에러 (필수 헤더 누락)
     assert response.status_code == 422
 
 

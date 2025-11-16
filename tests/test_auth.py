@@ -11,6 +11,7 @@
 import pytest
 from unittest.mock import patch, AsyncMock
 from src.models.user import User
+from tests.conftest import TEST_API_KEY
 
 
 def test_github_login_redirect(client):
@@ -97,14 +98,16 @@ def test_github_callback_creates_new_user(client, mock_github_api):
     # Given: 새 사용자 (DB에 없음)
     # Patch the global user_repo instance used by the auth router
     with patch('src.server.routers.auth.user_repo') as mock_repo:
-        # Simulate user creation via upsert (returns a User object)
-        mock_repo.upsert = AsyncMock(return_value=User(
-            id=1,
-            github_id=12345678,
-            username="testuser",
-            email="testuser@example.com",
-            name=None,
-            api_key="new-test-key"
+        mock_repo.sync_github_user = AsyncMock(return_value=(
+            User(
+                id=1,
+                github_id=12345678,
+                username="testuser",
+                email="testuser@example.com",
+                name=None,
+                avatar_url="https://avatars.githubusercontent.com/u/12345678",
+            ),
+            "new-test-api-key",
         ))
         
         # When: GitHub 콜백 호출
@@ -120,71 +123,40 @@ def test_api_key_authentication(client, mock_user_repo):
     """API 키 기반 인증이 올바르게 작동하는지 테스트.
     
     Given: 유효한 API 키를 가진 사용자가 있고
-    When: x-api-key 헤더와 함께 요청을 보내면
+    When: x-api-key 헤더와 함께 보호된 엔드포인트를 호출하면
     Then: 요청이 성공적으로 처리되어야 함
     
     검증사항:
     - HTTP 200 응답
-    - API 키 헤더가 올바르게 파싱됨
+    - x-api-key 헤더가 올바르게 파싱됨
     """
-    # When: API 키와 함께 요청
     response = client.get(
-        "/healthz",
-        headers={"x-api-key": "test-key-123"}
+        "/api/v1/commands",
+        headers={"x-api-key": TEST_API_KEY},
     )
     
-    # Then: 요청 성공
-    # 참고: Health 엔드포인트는 인증이 필요 없지만 헤더 파싱을 테스트함
     assert response.status_code == 200
 
 
 def test_invalid_api_key(client, mock_tools):
-    """유효하지 않은 API 키가 거부되는지 테스트.
-    
-    Given: 데이터베이스에 존재하지 않는 API 키로
-    When: 인증이 필요한 엔드포인트에 요청하면
-    Then: 401 Unauthorized 에러가 반환되어야 함
-    
-    검증사항:
-    - HTTP 401 응답 (인증 실패)
-    """
-    # Given: 유효하지 않은 API 키
+    """유효하지 않은 API 키가 거부되는지 테스트."""
     with patch('src.server.deps.user_repo') as mock_repo:
-        # get_current_user awaits get_by_api_key; ensure it's AsyncMock
         mock_repo.get_by_api_key = AsyncMock(return_value=None)
-        
-        # When: 유효하지 않은 API 키로 요청
         response = client.post(
             "/api/v1/diffs/apply",
             headers={"x-api-key": "invalid-key"},
-            json={"files": []}
+            json={"files": []},
         )
-        
-        # Then: 인증 실패
-        assert response.status_code == 401
+    assert response.status_code == 401
 
 
-def test_missing_api_key(client):
-    """API 키가 없을 때 요청이 거부되는지 테스트.
-    
-    Given: API 키 없이
-    When: 인증이 필요한 엔드포인트에 요청하면
-    Then: 422 Unprocessable Entity 에러가 반환되어야 함
-    
-    검증사항:
-    - HTTP 422 응답 (필수 헤더 누락)
-    
-    참고:
-    - FastAPI는 필수 Depends 파라미터 누락 시 422를 반환
-    - 401은 인증 실패 시 반환 (API 키가 잘못된 경우)
-    """
-    # When: API 키 없이 요청
+def test_missing_api_key_header(client):
+    """API 키 헤더가 없을 때 요청이 거부되는지 테스트."""
     response = client.post(
         "/api/v1/diffs/apply",
         json={"files": []}
     )
     
-    # Then: 422 에러 (필수 헤더 누락)
     assert response.status_code == 422
 
 
@@ -199,31 +171,29 @@ def test_user_isolation(client, mock_user_repo, mock_tools):
     - 두 사용자 모두 성공적으로 요청 처리
     - 각 사용자의 데이터가 독립적으로 관리됨
     """
-    # Given: User 1
-    user1 = mock_user_repo.get_user_by_api_key.return_value
-    user1.id = 1
-    
-    # When: User 1이 자신의 데이터로 요청
+    user1 = User(id=1, github_id=111, username="user1")
+    user2 = User(id=2, github_id=222, username="user2")
+
+    async def fake_get_by_api_key(token: str):
+        if token == "user1-key":
+            return user1
+        if token == "user2-key":
+            return user2
+        return None
+
+    mock_user_repo.get_by_api_key.side_effect = fake_get_by_api_key
+
     response1 = client.post(
         "/api/v1/diffs/apply",
         headers={"x-api-key": "user1-key"},
-        json={"files": [{"path": "test.py", "status": "modified", "after": "print(1)"}]}
+        json={"files": [{"path": "test.py", "status": "modified", "after": "print(1)"}]},
     )
-    
-    # Then: User 1 요청 성공
     assert response1.status_code == 200
-    
-    # Given: User 2 (다른 데이터)
-    user2 = mock_user_repo.get_user_by_api_key.return_value
-    user2.id = 2
-    
-    # When: User 2가 자신의 데이터로 요청
+
     response2 = client.post(
         "/api/v1/diffs/apply",
         headers={"x-api-key": "user2-key"},
-        json={"files": [{"path": "test.py", "status": "modified", "after": "print(2)"}]}
+        json={"files": [{"path": "test.py", "status": "modified", "after": "print(2)"}]},
     )
-    
-    # Then: User 2 요청도 성공 (서로 격리됨)
     assert response2.status_code == 200
 

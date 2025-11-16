@@ -11,6 +11,7 @@
 """
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
+from tests.conftest import TEST_API_KEY
 
 
 def test_blog_article_with_rag(client, mock_user_repo, mock_qdrant_client, mock_neo4j_driver, mock_openai_chat, mock_tools):
@@ -36,7 +37,7 @@ def test_blog_article_with_rag(client, mock_user_repo, mock_qdrant_client, mock_
     response = client.post(
         "/api/v1/llm/execute",
         json=request_data,
-        headers={"x-api-key": "test-key-123"}
+        headers={"x-api-key": TEST_API_KEY},
     )
     
     # Then: RAG를 통한 블로그 글 생성
@@ -97,7 +98,6 @@ def test_rag_deduplication(mock_user_repo):
         github_id=123,
         username="test",
         email="test@test.com",
-        api_key="test-key"
     )
     
     # Mock Vector DB results
@@ -162,7 +162,7 @@ def test_rag_context_format(mock_user_repo, mock_qdrant_client, mock_neo4j_drive
             response = client.post(
                 "/api/v1/llm/execute",
                 json=request_data,
-                headers={"x-api-key": "test-key-123"}
+                headers={"Authorization": f"Bearer {TEST_ACCESS_TOKEN}"}
             )
             
             # Then: 포맷팅된 컨텍스트로 성공적으로 호출됨
@@ -192,7 +192,6 @@ async def test_rag_with_empty_vector_results(mock_user_repo):
         github_id=123,
         username="test",
         email="test@test.com",
-        api_key="test-key"
     )
     
     # When: 빈 검색 결과로 블로그 생성
@@ -273,7 +272,7 @@ def test_rag_integration_with_multiple_dbs(client, mock_user_repo, mock_qdrant_c
             response = client.post(
                 "/api/v1/llm/execute",
                 json=request_data,
-                headers={"x-api-key": "test-key-123"}
+                headers={"x-api-key": TEST_API_KEY},
             )
             
             # Then: 두 DB 모두 쿼리됨
@@ -352,11 +351,11 @@ def test_rag_only_for_blog_article(client, mock_user_repo, mock_openai_chat, moc
     # When: 요청 수행
     with patch('src.adapters.vector_db.semantic_search') as mock_vector:
         with patch('src.adapters.graph_db.search_related_code') as mock_graph:
-            response = client.post(
-                "/api/v1/llm/execute",
-                json=request_data,
-                headers={"x-api-key": "test-key-123"}
-            )
+                response = client.post(
+                    "/api/v1/llm/execute",
+                    json=request_data,
+                    headers={"x-api-key": TEST_API_KEY},
+                )
             
             # Then: RAG가 호출되지 않음
             assert response.status_code == 200
@@ -385,8 +384,8 @@ def test_rag_user_isolation(mock_user_repo, mock_qdrant_client, mock_neo4j_drive
             from src.server.routers.agent import _execute_blog_article_with_rag
             from src.models.user import User
             
-            user1 = User(id=1, github_id=111, username="user1", email="u1@test.com", api_key="key1")
-            user2 = User(id=2, github_id=222, username="user2", email="u2@test.com", api_key="key2")
+            user1 = User(id=1, github_id=111, username="user1", email="u1@test.com")
+            user2 = User(id=2, github_id=222, username="user2", email="u2@test.com")
             
             # Track which user_ids were used
             vector_user_ids = []

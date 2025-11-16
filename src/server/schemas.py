@@ -32,7 +32,8 @@ class UserPublic(BaseModel):
     username: str
     email: Optional[str] = None
     name: Optional[str] = None
-    created_at: datetime
+    avatar_url: Optional[str] = None
+    created_at: Optional[datetime] = None
     last_login: Optional[datetime] = None
 
 
@@ -40,24 +41,21 @@ class AuthCallbackResponse(BaseModel):
     """GitHub OAuth callback 응답 모델.
     
     인증 성공 후 클라이언트에게 반환되는 정보입니다.
-    API 키를 포함하므로 클라이언트는 이를 저장하여 이후 요청에 사용합니다.
+    서버 간 통신용 JWT는 서버 내부에서만 사용되며 클라이언트에는 반환되지 않습니다.
     
     Attributes:
         success: 인증 성공 여부
-        api_key: 사용자 API 키 (이후 x-api-key 헤더에 사용)
         user: 사용자 공개 정보
         message: 성공 메시지
     
     Example:
         >>> response = AuthCallbackResponse(
         ...     success=True,
-        ...     api_key="abc-123-def-456",
         ...     user=UserPublic(...),
         ...     message="Successfully authenticated"
         ... )
     """
     success: bool
-    api_key: str = Field(..., description="API authentication key")
     user: UserPublic
     message: str = Field(default="Successfully authenticated")
     
@@ -65,15 +63,15 @@ class AuthCallbackResponse(BaseModel):
         json_schema_extra = {
             "example": {
                 "success": True,
-                "api_key": "550e8400-e29b-41d4-a716-446655440000",
                 "user": {
-                    "id": 1,
+                    "id": 12345678,
                     "github_id": 12345678,
                     "username": "parkj",
                     "email": "parkj@example.com",
                     "name": "Park J",
-                    "created_at": "2024-01-01T00:00:00",
-                    "last_login": "2024-01-02T12:00:00"
+                    "avatar_url": "https://avatars.githubusercontent.com/u/12345678",
+                    "created_at": None,
+                    "last_login": None
                 },
                 "message": "Successfully authenticated"
             }
@@ -187,123 +185,6 @@ class DiffApplyResult(BaseModel):
     graph_nodes_updated: int
     stats: Dict[str, Any] = Field(default_factory=dict)
 
-
-# ============================================================================
-# Command 관련 스키마
-# ============================================================================
-
-class CommandExecuteRequest(BaseModel):
-    """명령(툴) 실행 요청 모델.
-    
-    사용 가능한 툴 중 하나를 선택하여 실행합니다.
-    각 툴은 고유한 파라미터 스키마를 가지고 있습니다.
-    
-    Attributes:
-        name: 실행할 툴의 이름
-            가능한 값: "post_blog_article", "publish_to_notion",
-                      "create_commit_and_push"
-        params: 툴별 파라미터 딕셔너리
-    
-    Example:
-        >>> request = CommandExecuteRequest(
-        ...     name="post_blog_article",
-        ...     params={
-        ...         "title": "My Article",
-        ...         "markdown": "# Hello World"
-        ...     }
-        ... )
-    """
-    name: str = Field(..., description="Tool name to execute")
-    params: Dict[str, Any] = Field(default_factory=dict, description="Tool parameters")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "name": "post_blog_article",
-                "params": {
-                    "title": "My Article",
-                    "markdown": "# Hello World"
-                }
-            }
-        }
-
-
-class CommandExecuteResult(BaseModel):
-    """명령 실행 결과 응답 모델.
-    
-    툴 실행의 성공 여부와 결과를 담습니다.
-    
-    Attributes:
-        ok: 실행 성공 여부
-        tool: 실행된 툴의 이름
-        result: 툴 실행 결과 (툴마다 다른 형식)
-            - post_blog_article: {"success": True, "article": {...}}
-            - publish_to_notion: {"success": True, "page_id": "..."}
-            - create_commit_and_push: {"success": True, "commit_sha": "..."}
-            - 등등
-    
-    Example:
-        >>> result = CommandExecuteResult(
-        ...     ok=True,
-        ...     tool="post_blog_article",
-        ...     result={"success": True, "article_id": "123"}
-        ... )
-    """
-    ok: bool
-    tool: str
-    result: Any
-
-
-class ToolSchema(BaseModel):
-    """툴 스키마 정의 모델.
-    
-    사용 가능한 툴의 메타데이터를 표현합니다.
-    LLM이나 클라이언트가 툴을 이해하고 올바르게 호출할 수 있도록 합니다.
-    
-    Attributes:
-        name: 툴 식별자 (고유값)
-        title: 사람이 읽을 수 있는 제목
-        description: 툴의 기능 설명
-        input_schema: JSON Schema 형식의 입력 파라미터 스키마
-    
-    Example:
-        >>> tool = ToolSchema(
-        ...     name="post_blog_article",
-        ...     title="Post Blog Article",
-        ...     description="Publish an article to the blog platform",
-        ...     input_schema={
-        ...         "type": "object",
-        ...         "properties": {
-        ...             "title": {"type": "string"},
-        ...             "markdown": {"type": "string"}
-        ...         },
-        ...         "required": ["title", "markdown"]
-        ...     }
-        ... )
-    """
-    name: str
-    title: str
-    description: str
-    input_schema: Dict[str, Any]
-
-
-class CommandsListResponse(BaseModel):
-    """사용 가능한 명령(툴) 목록 응답 모델.
-    
-    GET /api/v1/commands 엔드포인트의 응답으로 사용됩니다.
-    
-    Attributes:
-        tools: 사용 가능한 모든 툴의 스키마 배열
-    
-    Example:
-        >>> response = CommandsListResponse(
-        ...     tools=[
-        ...         ToolSchema(name="post_blog_article", ...),
-        ...         ToolSchema(name="publish_to_notion", ...)
-        ...     ]
-        ... )
-    """
-    tools: List[ToolSchema]
 
 
 # ============================================================================
@@ -480,3 +361,120 @@ class ErrorResponse(BaseModel):
     """
     error: ErrorDetail
 
+
+# ============================================================================
+# Command 관련 스키마
+# ============================================================================
+
+class CommandExecuteRequest(BaseModel):
+    """명령(툴) 실행 요청 모델.
+    
+    사용 가능한 툴 중 하나를 선택하여 실행합니다.
+    각 툴은 고유한 파라미터 스키마를 가지고 있습니다.
+    
+    Attributes:
+        name: 실행할 툴의 이름
+            가능한 값: "post_blog_article", "publish_to_notion",
+                      "create_commit_and_push"
+        params: 툴별 파라미터 딕셔너리
+    
+    Example:
+        >>> request = CommandExecuteRequest(
+        ...     name="post_blog_article",
+        ...     params={
+        ...         "title": "My Article",
+        ...         "markdown": "# Hello World"
+        ...     }
+        ... )
+    """
+    name: str = Field(..., description="Tool name to execute")
+    params: Dict[str, Any] = Field(default_factory=dict, description="Tool parameters")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "name": "post_blog_article",
+                "params": {
+                    "title": "My Article",
+                    "markdown": "# Hello World"
+                }
+            }
+        }
+
+
+class CommandExecuteResult(BaseModel):
+    """명령 실행 결과 응답 모델.
+    
+    툴 실행의 성공 여부와 결과를 담습니다.
+    
+    Attributes:
+        ok: 실행 성공 여부
+        tool: 실행된 툴의 이름
+        result: 툴 실행 결과 (툴마다 다른 형식)
+            - post_blog_article: {"success": True, "article": {...}}
+            - publish_to_notion: {"success": True, "page_id": "..."}
+            - create_commit_and_push: {"success": True, "commit_sha": "..."}
+            - 등등
+    
+    Example:
+        >>> result = CommandExecuteResult(
+        ...     ok=True,
+        ...     tool="post_blog_article",
+        ...     result={"success": True, "article_id": "123"}
+        ... )
+    """
+    ok: bool
+    tool: str
+    result: Any
+
+
+class ToolSchema(BaseModel):
+    """툴 스키마 정의 모델.
+    
+    사용 가능한 툴의 메타데이터를 표현합니다.
+    LLM이나 클라이언트가 툴을 이해하고 올바르게 호출할 수 있도록 합니다.
+    
+    Attributes:
+        name: 툴 식별자 (고유값)
+        title: 사람이 읽을 수 있는 제목
+        description: 툴의 기능 설명
+        input_schema: JSON Schema 형식의 입력 파라미터 스키마
+    
+    Example:
+        >>> tool = ToolSchema(
+        ...     name="post_blog_article",
+        ...     title="Post Blog Article",
+        ...     description="Publish an article to the blog platform",
+        ...     input_schema={
+        ...         "type": "object",
+        ...         "properties": {
+        ...             "title": {"type": "string"},
+        ...             "markdown": {"type": "string"}
+        ...         },
+        ...         "required": ["title", "markdown"]
+        ...     }
+        ... )
+    """
+    name: str
+    title: str
+    description: str
+    input_schema: Dict[str, Any]
+
+
+class CommandsListResponse(BaseModel):
+    """사용 가능한 명령(툴) 목록 응답 모델.
+    
+    GET /api/v1/commands 엔드포인트의 응답으로 사용됩니다.
+    
+    Attributes:
+        tools: 사용 가능한 모든 툴의 스키마 배열
+    
+    Example:
+        >>> response = CommandsListResponse(
+        ...     tools=[
+        ...         ToolSchema(name="post_blog_article", ...),
+        ...         ToolSchema(name="publish_to_notion", ...)
+        ...     ]
+        ... )
+    """
+    tools: List[ToolSchema]

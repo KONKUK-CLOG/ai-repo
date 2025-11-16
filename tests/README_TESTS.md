@@ -155,8 +155,7 @@ All tests use the following mock fixtures from `conftest.py`:
     "id": 1,
     "github_id": 12345678,
     "username": "testuser",
-    "email": "testuser@example.com",
-    "api_key": "test-key-123"
+    "email": "testuser@example.com"
 }
 ```
 

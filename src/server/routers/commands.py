@@ -64,7 +64,7 @@ async def list_commands(
         
     Example:
         >>> GET /api/v1/commands
-        >>> Headers: {"x-api-key": "your-key"}
+        >>> Headers: {"x-api-key": "user-api-key"}
         >>> Response:
         {
             "tools": [
@@ -108,7 +108,8 @@ async def list_commands(
 async def execute_command(
     request: CommandExecuteRequest,
     user: User = Depends(get_current_user),
-    x_idempotency_key: Optional[str] = Header(None)
+    x_idempotency_key: Optional[str] = Header(None),
+    x_api_key: str = Header(..., alias="x-api-key"),
 ) -> CommandExecuteResult:
     """지정된 툴을 실행합니다.
     
@@ -148,7 +149,7 @@ async def execute_command(
     Example (성공):
         >>> POST /api/v1/commands/execute
         >>> Headers: {
-        >>>     "x-api-key": "your-key",
+        >>>     "x-api-key": "user-api-key",
         >>>     "x-idempotency-key": "abc-123"
         >>> }
         >>> Body: {
@@ -196,7 +197,12 @@ async def execute_command(
         # 4. 툴 실행
         if hasattr(tool_module, "run"):
             # 툴의 run() 메서드 호출 (비동기)
-            result = await tool_module.run(request.params)
+            params = dict(request.params or {})
+
+            if request.name == "post_blog_article":
+                params.setdefault("api_key", x_api_key)
+
+            result = await tool_module.run(params)
             
             # 성공 결과 반환
             return CommandExecuteResult(

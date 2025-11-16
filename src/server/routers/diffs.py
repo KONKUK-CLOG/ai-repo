@@ -88,7 +88,7 @@ async def apply_diff(
     
     Example (unified 모드):
         >>> POST /api/v1/diffs/apply
-        >>> Headers: {"x-api-key": "your-key"}
+        >>> Headers: {"x-api-key": "user-api-key"}
         >>> Body: {
         >>>     "unified": "--- a/test.py\n+++ b/test.py\n..."
         >>> }

@@ -24,11 +24,11 @@ A: 개발자/운영자가 서버 시작 전에 .env 파일에 한 번만 설정�
     이후 모든 사용자가 이 하나의 OAuth 앱을 통해 로그인합니다.
 
 Q: 여러 사용자는 어떻게 구분하나?
-A: GitHub ID와 각자의 API 키로 구분합니다.
+A: GitHub ID와 각자의 API Key로 구분합니다.
 
-사용자 A → GitHub 로그인 → API 키: key-A 발급
-사용자 B → GitHub 로그인 → API 키: key-B 발급
-사용자 C → GitHub 로그인 → API 키: key-C 발급
+사용자 A → GitHub 로그인 → api_key: key-A 발급
+사용자 B → GitHub 로그인 → api_key: key-B 발급
+사용자 C → GitHub 로그인 → api_key: key-C 발급
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🔄 OAuth 2.0 인증 플로우 (표준 Authorization Code Flow)
@@ -50,21 +50,21 @@ A: GitHub ID와 각자의 API 키로 구분합니다.
 5. 서버: GitHub API에서 사용자 정보 조회
    └─ access_token으로 GitHub API 호출 → 사용자 프로필
 
-6. 서버: DB에 사용자 upsert (없으면 생성, 있으면 업데이트)
+6. 서버: Java 백엔드에 사용자 정보 동기화
    └─ github_id를 기준으로 사용자 식별
-   └─ 신규 사용자면 새 API 키 생성, 기존 사용자면 last_login 업데이트
+   └─ Java 백엔드가 사용자 정보를 저장/업데이트 후 API Key 발급
 
-7. 서버: API 키 반환 (클라이언트는 이후 x-api-key 헤더에 사용)
-   └─ 클라이언트는 이 API 키를 저장하여 모든 API 요청에 포함
+7. 서버: API Key 반환
+   └─ 클라이언트는 이 키를 저장하여 x-api-key 헤더에 포함
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🔐 보안 모델: Stateless Authentication
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 - 서버는 세션을 저장하지 않음 (Stateless)
-- 각 사용자는 고유한 API 키를 발급받음
-- API 키는 x-api-key 헤더로 전송하여 인증
-- 로그아웃 = 클라이언트에서 API 키 삭제
+- 각 사용자는 Java 백엔드가 발급한 API Key를 보유
+- API Key는 x-api-key 헤더로 전송하여 인증
+- 로그아웃 = 클라이언트에서 토큰 삭제
 
 장점:
 ✓ 수평 확장 용이 (서버 간 세션 공유 불필요)
@@ -72,13 +72,14 @@ A: GitHub ID와 각자의 API 키로 구분합니다.
 ✓ 구현 단순
 """
 from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse
 from src.server.settings import settings
 from src.server.schemas import AuthCallbackResponse, UserPublic
 from src.adapters import github
-from src.repositories.user_repo import user_repo
+from src.adapters import java_backend
 import logging
 import urllib.parse
+import httpx
 
 router = APIRouter(prefix="/auth/github", tags=["auth"])
 logger = logging.getLogger(__name__)
@@ -180,7 +181,7 @@ async def github_callback(code: str):
     
     GitHub에서 인증 후 돌아오는 엔드포인트입니다.
     OAuth code를 access token으로 교환하고, 사용자 정보를 조회하여
-    DB에 저장한 후 API 키를 반환합니다.
+    Java 백엔드에서 API Key를 발급받아 반환합니다.
     
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     🔐 OAuth Step 2-7: 콜백 처리 (핵심!)
@@ -211,13 +212,13 @@ async def github_callback(code: str):
             - email: 이메일
             - name: 이름
     
-    Step 5: DB에 사용자 저장/업데이트
+    Step 5: Java 백엔드에 사용자 저장/업데이트
             github_id로 조회:
-            - 없으면: 새 사용자 생성 + API 키 발급
+            - 없으면: Java 백엔드가 새 사용자 생성 + API Key 발급
             - 있으면: last_login 업데이트
     
-    Step 6: 사용자별 API 키 반환
-            이 API 키로 이후 모든 API 요청을 인증합니다.
+    Step 6: 사용자별 API Key 반환
+            이 키로 이후 모든 API 요청을 인증합니다.
     
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     💡 여러 사용자는 어떻게 구분되나?
@@ -231,7 +232,7 @@ async def github_callback(code: str):
     
     같은 CLIENT_ID를 사용하지만, GitHub가 각 사용자마다
     다른 code를 발급하고, 그 code로 조회한 사용자 정보가
-    달라서 결국 다른 API 키를 받습니다!
+    달라서 결국 서로 다른 API Key를 받습니다!
     
     Args:
         code: GitHub OAuth authorization code (일회용, 10분 유효)
@@ -239,7 +240,7 @@ async def github_callback(code: str):
     Returns:
         AuthCallbackResponse: 인증 성공 응답
             - success: True
-            - api_key: 사용자별 고유 API 키 (UUID 형식)
+            - api_key: Java 백엔드가 발급한 사용자 API Key
             - user: 사용자 공개 정보
             - message: 성공 메시지
     
@@ -266,7 +267,7 @@ async def github_callback(code: str):
         >>> GET /auth/github/callback?code=xyz789
         >>> Response: {
         >>>     "success": true,
-        >>>     "api_key": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",  # 다른 키!
+        >>>     "api_key": "550e8400-e29b-41d4-a716-446655440000",  # 사용자 별 API Key
         >>>     "user": {
         >>>         "id": 2,
         >>>         "github_id": 67890,
@@ -337,71 +338,55 @@ async def github_callback(code: str):
     logger.info(f"GitHub user authenticated: {user_info['login']} (id={user_info['id']})")
     
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # Step 2-4: DB에 사용자 저장/업데이트 (Upsert 패턴)
+    # Step 2-4: Java 백엔드에서 서버 간 통신용 JWT 발급받기
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # github_id를 기준으로 조회:
-    #
-    # 시나리오 1: 신규 사용자 (github_id가 DB에 없음)
-    #   → INSERT:
-    #     - github_id: 12345
-    #     - username: "parkj"
-    #     - api_key: UUID 생성 (550e8400-e29b-41d4...)
-    #     - created_at: 현재 시각
-    #     - last_login: 현재 시각
-    #
-    # 시나리오 2: 기존 사용자 (github_id가 DB에 있음)
-    #   → UPDATE:
-    #     - last_login: 현재 시각 (업데이트)
-    #     - username, email, name: 최신 정보로 업데이트 (GitHub에서 변경 가능)
-    #     - api_key: 유지 (변경하지 않음!)
-    #
-    # 왜 api_key를 새로 발급하지 않나?
-    # → 기존 사용자가 로그인할 때마다 API 키가 바뀌면
-    #   클라이언트가 계속 새 키를 저장해야 해서 불편함
-    user = await user_repo.upsert(
-        github_id=user_info["id"],
-        username=user_info["login"],
-        email=user_info.get("email"),
-        name=user_info.get("name")
-    )
+    # GitHub user_id를 Java 서버에 전달하여 JWT를 발급받습니다.
+    # 이 JWT는 이후 Python 서버와 Java 서버 간 통신에 사용됩니다.
+    github_user_id = user_info["id"]
+    try:
+        service_jwt = await java_backend.get_service_jwt_for_user(github_user_id)
+        java_backend.set_service_jwt(github_user_id, service_jwt)
+        logger.info(f"Service JWT issued and cached for GitHub user {github_user_id}")
+    except httpx.HTTPError as exc:
+        logger.error("Failed to get service JWT from Java backend: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to get service JWT from backend service",
+        ) from exc
+    except Exception as exc:
+        logger.error("Invalid JWT response from Java backend: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected response from backend service",
+        ) from exc
     
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Step 2-5: 응답 데이터 준비
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # UserPublic: 보안을 위해 API 키는 제외한 공개 정보만
-    #             (응답에서는 api_key를 별도 필드로 전달)
+    # GitHub 정보로 직접 UserPublic 구성 (JWT는 서버 내부에서만 사용)
     user_public = UserPublic(
-        id=user.id,
-        github_id=user.github_id,
-        username=user.username,
-        email=user.email,
-        name=user.name,
-        created_at=user.created_at,
-        last_login=user.last_login
+        id=github_user_id,  # GitHub user_id를 그대로 사용
+        github_id=github_user_id,
+        username=user_info["login"],
+        email=user_info.get("email"),
+        name=user_info.get("name"),
+        avatar_url=user_info.get("avatar_url"),
+        created_at=None,  # Java 서버에서 받지 않으므로 None
+        last_login=None,  # Java 서버에서 받지 않으므로 None
     )
     
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # Step 2-6: 최종 응답 반환 (API 키 포함!)
+    # Step 2-6: 최종 응답 반환 (JWT는 서버 내부에서만 사용)
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # 클라이언트는 이 api_key를 저장하고, 이후 모든 API 요청에
-    # x-api-key 헤더로 포함해야 합니다.
-    #
-    # 예시:
-    # fetch('/api/v1/diffs/apply', {
-    #   headers: {
-    #     'x-api-key': '550e8400-e29b-41d4-a716-446655440000',
-    #     'Content-Type': 'application/json'
-    #   },
-    #   body: JSON.stringify({...})
-    # })
     response = AuthCallbackResponse(
         success=True,
-        api_key=user.api_key,  # ← 사용자별 고유 API 키
         user=user_public,
-        message=f"Successfully authenticated as {user.username}"
+        message=f"Successfully authenticated as {user_info['login']}"
     )
     
-    logger.info(f"User {user.username} (id={user.id}) authenticated successfully")
+    logger.info(
+        f"User {user_info['login']} (github_id={github_user_id}) authenticated successfully"
+    )
     
     return response
 
@@ -410,8 +395,8 @@ async def github_callback(code: str):
 async def github_logout():
     """로그아웃 엔드포인트.
     
-    현재는 stateless 인증(API 키 기반)이므로 서버에서 할 일이 없습니다.
-    클라이언트가 API 키를 삭제하면 됩니다.
+    현재는 stateless 인증(API Key 기반)이므로 서버에서 할 일이 없습니다.
+    클라이언트가 저장한 키를 삭제하면 됩니다.
     
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     🚪 Stateless 로그아웃
@@ -422,9 +407,9 @@ async def github_logout():
     - 로그아웃 시 서버에서 세션 삭제 필요
     
     현재 시스템 (Stateless):
-    - 서버는 API 키 외에 아무것도 저장하지 않음
+    - 서버는 API Key 외에 아무것도 저장하지 않음
     - 로그인 상태를 추적하지 않음
-    - 로그아웃 = 클라이언트가 API 키 삭제
+    - 로그아웃 = 클라이언트가 토큰 삭제
     
     장점:
     ✓ 서버 확장이 쉬움 (세션 공유 불필요)
@@ -432,8 +417,8 @@ async def github_logout():
     ✓ 분산 시스템에 적합
     
     단점:
-    ✗ API 키 유출 시 강제 로그아웃 어려움
-      (해결: DB에서 api_key 변경하는 엔드포인트 추가 가능)
+    ✗ 토큰 유출 시 강제 무효화 어려움
+      (해결: 블랙리스트 또는 토큰 재발급 로직 추가 가능)
     
     클라이언트 구현 예시:
     ```javascript
@@ -454,9 +439,9 @@ async def github_logout():
         >>> }
     """
     # Stateless 시스템이므로 서버는 아무 작업도 하지 않음
-    # 클라이언트가 API 키를 삭제하는 것으로 충분
+    # 클라이언트가 저장된 토큰을 삭제하는 것으로 충분
     return {
-        "message": "Logout successful. Please delete your API key from the client.",
+        "message": "Logout successful. Please delete your access token from the client.",
         "note": "This is a stateless authentication system. The server does not track sessions."
     }
 

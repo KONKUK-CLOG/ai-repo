@@ -1,5 +1,5 @@
 """LLM agent endpoints for natural language command execution."""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Header, status
 from src.server.deps import get_current_user
 from src.models.user import User
 from src.server.schemas import (
@@ -37,7 +37,7 @@ TOOLS_REGISTRY = {
 }
 
 
-async def _execute_regular_tool(tool_name: str, params: dict) -> dict:
+async def _execute_regular_tool(tool_name: str, params: dict, user_api_key: str | None = None) -> dict:
     """Execute a regular tool by name with given parameters.
     
     Args:
@@ -54,10 +54,14 @@ async def _execute_regular_tool(tool_name: str, params: dict) -> dict:
         raise ValueError(f"Tool '{tool_name}' not found")
     
     tool_module = TOOLS_REGISTRY[tool_name]
+    effective_params = dict(params or {})
+
+    if user_api_key and tool_name == "post_blog_article":
+        effective_params.setdefault("api_key", user_api_key)
     if not hasattr(tool_module, "run"):
         raise ValueError(f"Tool '{tool_name}' has no run method")
     
-    return await tool_module.run(params)
+    return await tool_module.run(effective_params)
 
 
 async def call_llm_with_tools(
@@ -233,7 +237,8 @@ def _fallback_tool_selection(prompt: str, context: dict) -> tuple[str, list[dict
 @router.post("/execute", response_model=LLMExecuteResult)
 async def execute_llm_command(
     request: LLMExecuteRequest,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    x_api_key: str = Header(..., alias="x-api-key"),
 ) -> LLMExecuteResult:
     """사용자의 자연어 명령을 LLM이 해석하고 실행합니다.
     
@@ -284,7 +289,11 @@ async def execute_llm_command(
                     params["user_id"] = user.id
                 
                 # 모든 툴은 일반 실행 (RAG는 별도 툴로 LLM이 선택)
-                result = await _execute_regular_tool(tool_name, params)
+                result = await _execute_regular_tool(
+                    tool_name,
+                    params,
+                    user_api_key=x_api_key,
+                )
                 
                 executed_tool_calls.append(ToolCall(
                     tool=tool_name,

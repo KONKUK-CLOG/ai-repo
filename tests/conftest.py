@@ -24,6 +24,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from typing import List, Dict, Any
 
 
+TEST_API_KEY = "test-api-key"
+
+
 @pytest.fixture
 def client():
     """FastAPI 테스트 클라이언트를 생성합니다.
@@ -60,8 +63,7 @@ def mock_user():
         - GitHub ID: 12345678
         - Username: testuser
         - Email: testuser@example.com
-        - API Key: test-key-123
-        - 모든 테스트에서 일관된 사용자 정보 사용
+        - Java 백엔드에서 발급된 API 키로 인증 (테스트에서는 더미 키 사용)
     """
     return User(
         id=1,
@@ -69,12 +71,11 @@ def mock_user():
         username="testuser",
         email="testuser@example.com",
         avatar_url="https://avatars.githubusercontent.com/u/12345678",
-        api_key="test-key-123"
     )
 
 
 @pytest.fixture
-def api_headers(mock_user):
+def api_headers():
     """API 인증 헤더를 생성합니다.
     
     Args:
@@ -89,11 +90,11 @@ def api_headers(mock_user):
             assert response.status_code == 200
             
     설명:
-        - x-api-key 헤더에 mock_user의 API 키 포함
+        - x-api-key 헤더에 API 키 포함
         - 인증이 필요한 엔드포인트 테스트 시 사용
         - 401 에러 없이 보호된 리소스 접근 가능
     """
-    return {"x-api-key": mock_user.api_key}
+    return {"x-api-key": TEST_API_KEY}
 
 
 @pytest.fixture
@@ -106,30 +107,17 @@ def mock_user_repo(mock_user):
     Yields:
         Mock: UserRepository의 mock 객체
         
-    사용법:
-        def test_user_auth(client, mock_user_repo):
-            # mock_user_repo가 자동으로 적용됨
-            response = client.get("/api/v1/commands", headers={"x-api-key": "test-key-123"})
-            assert response.status_code == 200
-            
     설명:
-        - 실제 SQLite DB 접근 없이 테스트
-        - API 키, GitHub ID로 사용자 조회 가능
-        - 새 사용자 생성도 mocking
-        - 모든 메서드가 mock_user 반환
+        - Java 백엔드 호출 없이 사용자 정보를 반환
+        - API 키 기반 인증 흐름을 테스트에서 간소화
     """
-    with patch('src.server.deps.user_repo') as mock_repo:
-        # Align mocked methods with actual repository API used in code
-        mock_repo.get_by_api_key = AsyncMock(return_value=mock_user)
-        mock_repo.get_by_github_id = AsyncMock(return_value=mock_user)
-        mock_repo.create = AsyncMock(return_value=mock_user)
-        mock_repo.upsert = AsyncMock(return_value=mock_user)
-        mock_repo.update_last_login = AsyncMock(return_value=None)
-        # Backward-compatible aliases for older test names
-        mock_repo.get_user_by_api_key = mock_repo.get_by_api_key
-        mock_repo.get_user_by_github_id = mock_repo.get_by_github_id
-        mock_repo.create_user = mock_repo.create
-        yield mock_repo
+    with patch('src.server.deps.user_repo') as deps_repo, \
+         patch('src.server.routers.auth.user_repo') as auth_repo:
+        for repo in (deps_repo, auth_repo):
+            repo.get_by_api_key = AsyncMock(return_value=mock_user)
+            repo.get_by_id = AsyncMock(return_value=mock_user)
+            repo.sync_github_user = AsyncMock(return_value=(mock_user, TEST_API_KEY))
+        yield deps_repo
 
 
 @pytest.fixture(autouse=True)
@@ -180,7 +168,7 @@ def mock_openai_chat():
         def test_llm_agent(client, mock_openai_chat):
             response = client.post("/api/v1/llm/execute", 
                                     json={"prompt": "블로그 써줘"},
-                                    headers={"x-api-key": "test-key-123"})
+                                    headers={"x-api-key": TEST_API_KEY})
             assert response.status_code == 200
             
     설명:
