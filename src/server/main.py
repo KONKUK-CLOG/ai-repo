@@ -2,11 +2,12 @@
 import logging
 import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.server.routers import health, diffs, agent, auth
 from src.server.settings import settings
 from src.background.scheduler import start_scheduler, shutdown_scheduler, run_task_now
+from src.server.deps import get_java_service_identity
 
 # Configure logging
 logging.basicConfig(
@@ -84,7 +85,9 @@ async def root():
 
 # Admin endpoints for manual triggers
 @app.post("/api/v1/admin/wal-recovery")
-async def trigger_wal_recovery():
+async def trigger_wal_recovery(
+    _: dict = Depends(get_java_service_identity),
+):
     """수동으로 WAL 복구 트리거 (관리자 전용)
     
     실패한 WAL 작업을 즉시 재시도합니다.
@@ -94,7 +97,9 @@ async def trigger_wal_recovery():
 
 
 @app.post("/api/v1/admin/wal-cleanup")
-async def trigger_wal_cleanup():
+async def trigger_wal_cleanup(
+    _: dict = Depends(get_java_service_identity),
+):
     """수동으로 WAL 정리 트리거 (관리자 전용)
     
     7일 이상 된 성공한 WAL 엔트리를 삭제합니다.
@@ -104,7 +109,9 @@ async def trigger_wal_cleanup():
 
 
 @app.get("/api/v1/admin/wal-stats")
-async def get_wal_stats():
+async def get_wal_stats(
+    _: dict = Depends(get_java_service_identity),
+):
     """WAL 통계 조회
     
     Returns:

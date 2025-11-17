@@ -1,5 +1,5 @@
 """LLM agent endpoints for natural language command execution."""
-from fastapi import APIRouter, Depends, HTTPException, Header, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from src.server.deps import get_current_user
 from src.models.user import User
 from src.server.schemas import (
@@ -238,7 +238,6 @@ def _fallback_tool_selection(prompt: str, context: dict) -> tuple[str, list[dict
 async def execute_llm_command(
     request: LLMExecuteRequest,
     user: User = Depends(get_current_user),
-    x_api_key: str = Header(..., alias="x-api-key"),
 ) -> LLMExecuteResult:
     """사용자의 자연어 명령을 LLM이 해석하고 실행합니다.
     
@@ -252,7 +251,7 @@ async def execute_llm_command(
     
     Args:
         request: LLM 실행 요청 (프롬프트, 컨텍스트 등)
-        api_key: 인증된 API 키
+        user: 인증된 사용자 (JWT에서 자동 추출 및 검증)
         
     Returns:
         LLM 실행 결과 (사고 과정, 툴 호출 목록, 최종 응답)
@@ -292,7 +291,7 @@ async def execute_llm_command(
                 result = await _execute_regular_tool(
                     tool_name,
                     params,
-                    user_api_key=x_api_key,
+                    user_api_key=None,
                 )
                 
                 executed_tool_calls.append(ToolCall(

@@ -22,20 +22,19 @@ class Settings(BaseSettings):
     BLOG_API_URL: str = "https://api.example.com/blog"
     BLOG_API_KEY: Optional[str] = None
 
-    # Java Backend Integration
-    JAVA_BACKEND_BASE_URL: str = "http://localhost:8080"
-    JAVA_BACKEND_TIMEOUT: int = 10  # seconds
-    JAVA_BACKEND_JWKS_URL: Optional[str] = None
-    JAVA_BACKEND_SERVICE_JWT: Optional[str] = None
-    
-    # Java Backend Integration
     JAVA_BACKEND_BASE_URL: str = "http://localhost:9001"
     JAVA_BACKEND_TIMEOUT: float = 10.0
     JAVA_BACKEND_JWKS_URL: Optional[str] = None
-    JAVA_BACKEND_SERVICE_JWT: Optional[str] = None
     JAVA_BACKEND_JWT_ALGORITHMS: str = "RS256"
     JAVA_BACKEND_JWT_AUDIENCE: Optional[str] = None
     JAVA_BACKEND_JWT_ISSUER: Optional[str] = None
+    
+    # Service-to-service authentication
+    JAVA_BACKEND_SERVICE_JWT: Optional[str] = None
+    JAVA_BACKEND_SERVICE_JWT_REFRESH_PATH: Optional[str] = "/api/v1/auth/service-jwt"
+    JAVA_BACKEND_SERVICE_JWT_ALGORITHMS: Optional[str] = None
+    JAVA_BACKEND_SERVICE_JWT_AUDIENCE: Optional[str] = None
+    JAVA_BACKEND_SERVICE_JWT_ISSUER: Optional[str] = None
     
     # Vector Database
     VECTOR_DB_URL: str = "http://localhost:6333"

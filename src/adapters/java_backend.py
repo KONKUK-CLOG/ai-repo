@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, Dict, Optional
 
 import httpx
@@ -11,33 +12,80 @@ from src.server.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# 사용자별 서버 간 통신용 JWT 캐시
-_user_service_jwt_cache: Dict[int, str] = {}
+# 서비스 간 통신용 JWT 캐시
+_service_jwt: Optional[str] = None
+_service_jwt_expires_at: Optional[int] = None
 
 
-def get_cached_service_jwt(user_id: int) -> Optional[str]:
-    """캐시된 서비스 JWT를 가져옵니다.
-    
+def cache_service_jwt(jwt: str, expires_at: Optional[int] = None) -> None:
+    """서비스 간 통신용 JWT를 캐시에 저장합니다."""
+    global _service_jwt, _service_jwt_expires_at
+    _service_jwt = jwt
+    _service_jwt_expires_at = expires_at
+    logger.debug("Cached service JWT (expires_at=%s)", expires_at)
+
+
+def get_cached_service_jwt() -> Optional[str]:
+    """캐시된 서비스 JWT를 반환합니다."""
+    if _service_jwt and not _service_jwt_expired():
+        return _service_jwt
+    return None
+
+
+def _service_jwt_expired(buffer_seconds: int = 60) -> bool:
+    if _service_jwt is None:
+        return True
+    if _service_jwt_expires_at is None:
+        return False
+    current_time = int(time.time())
+    return current_time >= (_service_jwt_expires_at - buffer_seconds)
+
+
+async def refresh_service_jwt(payload: Optional[Dict[str, Any]] = None) -> str:
+    """Java 서버에 요청하여 새로운 서비스 JWT를 발급받습니다.
+
     Args:
-        user_id: 사용자 ID (GitHub user_id 또는 Java 백엔드의 내부 사용자 ID)
-    
+        payload: 발급 요청 시 함께 보낼 JSON 본문 (선택)
+
     Returns:
-        캐시된 JWT 토큰 문자열, 없으면 None
+        새로 발급받은 JWT 문자열
+
+    Raises:
+        JavaBackendError: 발급 요청 실패
     """
-    return _user_service_jwt_cache.get(user_id)
+    refresh_path = settings.JAVA_BACKEND_SERVICE_JWT_REFRESH_PATH or "/api/v1/auth/service-jwt"
+    response = await _request(
+        "POST",
+        refresh_path,
+        json_body=payload,
+    )
+
+    jwt_token = response.get("jwt") or response.get("token") or response.get("access_token")
+    if not jwt_token:
+        raise JavaBackendError("Service JWT response missing token")
+
+    expires_at = response.get("expires_at") or response.get("exp")
+    expires_at_int: Optional[int] = None
+    if isinstance(expires_at, (int, float)):
+        expires_at_int = int(expires_at)
+
+    cache_service_jwt(jwt_token, expires_at_int)
+    return jwt_token
 
 
-def set_service_jwt(user_id: int, jwt: str) -> None:
-    """서비스 JWT를 캐시에 저장합니다.
-    
-    Args:
-        user_id: 사용자 ID
-        jwt: JWT 토큰 문자열
-    """
-    _user_service_jwt_cache[user_id] = jwt
-    logger.debug(f"Cached service JWT for user {user_id}")
+async def ensure_service_jwt(force_refresh: bool = False) -> str:
+    """서비스 JWT를 확보합니다. 필요 시 발급 엔드포인트를 호출합니다."""
+    if not force_refresh:
+        cached = get_cached_service_jwt()
+        if cached:
+            return cached
 
+    # 환경 변수 기반 기본 토큰
+    if settings.JAVA_BACKEND_SERVICE_JWT and not force_refresh:
+        cache_service_jwt(settings.JAVA_BACKEND_SERVICE_JWT)
+        return settings.JAVA_BACKEND_SERVICE_JWT
 
+    return await refresh_service_jwt()
 class JavaBackendError(RuntimeError):
     """Raised when the Java backend returns an unexpected response."""
 
@@ -58,8 +106,6 @@ def _default_timeout() -> float:
 def _build_headers(
     *,
     bearer_token: Optional[str] = None,
-    use_service_token: bool = False,
-    user_id: Optional[int] = None,
     extra_headers: Optional[Dict[str, str]] = None,
 ) -> Dict[str, str]:
     headers: Dict[str, str] = {"Accept": "application/json"}
@@ -67,26 +113,8 @@ def _build_headers(
     if extra_headers:
         headers.update(extra_headers)
 
-    token: Optional[str] = None
     if bearer_token:
-        token = bearer_token
-    elif use_service_token:
-        # user_id가 있으면 해당 사용자의 캐시된 JWT 사용, 없으면 기본 서비스 JWT
-        if user_id:
-            token = get_cached_service_jwt(user_id)
-            if not token:
-                logger.warning(
-                    f"No cached JWT for user {user_id}, using default service JWT"
-                )
-                token = settings.JAVA_BACKEND_SERVICE_JWT
-        else:
-            token = settings.JAVA_BACKEND_SERVICE_JWT
-        
-        if not token:
-            raise JavaBackendError("JAVA_BACKEND_SERVICE_JWT is not configured.")
-
-    if token:
-        headers.setdefault("Authorization", f"Bearer {token}")
+        headers.setdefault("Authorization", f"Bearer {bearer_token}")
 
     return headers
 
@@ -97,16 +125,12 @@ async def _request(
     *,
     json_body: Optional[Dict[str, Any]] = None,
     bearer_token: Optional[str] = None,
-    use_service_token: bool = False,
-    user_id: Optional[int] = None,
     extra_headers: Optional[Dict[str, str]] = None,
     timeout: Optional[float] = None,
 ) -> Dict[str, Any]:
     url = _build_url(path)
     headers = _build_headers(
         bearer_token=bearer_token,
-        use_service_token=use_service_token,
-        user_id=user_id,
         extra_headers=extra_headers,
     )
 
@@ -148,67 +172,23 @@ async def _request(
         raise JavaBackendError("Invalid JSON response from Java backend") from exc
 
 
-async def sync_github_user(github_profile: Dict[str, Any]) -> Dict[str, Any]:
-    """Send GitHub user profile data to the Java backend and receive an API key payload."""
-    return await _request(
-        "POST",
-        "/api/v1/users/github",
-        json_body=github_profile,
-        use_service_token=True,
-    )
-
-
-async def get_service_jwt_for_user(user_id: int) -> str:
-    """Java 서버에서 user_id에 대한 서버 간 통신용 JWT를 발급받습니다.
+async def get_user_by_id(
+    user_id: int,
+    bearer_token: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Fetch a user record by numeric ID using the provided JWT token.
     
     Args:
-        user_id: 사용자 ID (GitHub user_id 또는 Java 백엔드의 내부 사용자 ID)
-    
-    Returns:
-        서버 간 통신용 JWT 토큰 문자열
-    
-    Raises:
-        JavaBackendError: Java 서버 요청 실패 또는 JWT가 응답에 없음
+        user_id: 사용자 ID
+        bearer_token: Java 서버로 전달할 JWT 토큰 (없으면 서비스 JWT 사용)
     """
-    payload = await _request(
-        "POST",
-        f"/api/v1/users/{user_id}/service-jwt",
-        json_body={"user_id": user_id},
-        use_service_token=True,
-    )
+    if bearer_token is None:
+        bearer_token = await ensure_service_jwt()
     
-    # 다양한 가능한 필드명 시도
-    jwt_token = (
-        payload.get("jwt")
-        or payload.get("token")
-        or payload.get("service_jwt")
-        or payload.get("access_token")
-    )
-    
-    if not jwt_token:
-        raise JavaBackendError(
-            f"Java backend response missing JWT token. Response: {payload}"
-        )
-    
-    logger.info(f"Service JWT issued for user {user_id}")
-    return jwt_token
-
-
-async def get_user_by_id(user_id: int) -> Dict[str, Any]:
-    """Fetch a user record by numeric ID using the service JWT."""
     return await _request(
         "GET",
         f"/api/v1/users/{user_id}",
-        use_service_token=True,
-    )
-
-
-async def get_user_by_api_key(api_key: str) -> Dict[str, Any]:
-    """Resolve a user using their API key."""
-    return await _request(
-        "GET",
-        f"/api/v1/users/by-api-key/{api_key}",
-        use_service_token=True,
+        bearer_token=bearer_token,
     )
 
 
@@ -217,7 +197,6 @@ async def create_blog_post(api_key: str, payload: Dict[str, Any]) -> Dict[str, A
     return await _request(
         "POST",
         "/api/v1/blog/posts",
-        use_service_token=True,
         json_body=payload,
         extra_headers={"X-User-Api-Key": api_key},
     )

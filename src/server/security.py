@@ -46,8 +46,13 @@ def _get_jwks_client() -> PyJWKClient:
     return _jwks_client
 
 
-async def verify_jwt(token: str) -> Dict[str, Any]:
-    """Verify a JWT issued by the Java backend and return its payload."""
+async def _decode_jwt(
+    token: str,
+    *,
+    audience: Optional[str],
+    issuer: Optional[str],
+    algorithms: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     client = _get_jwks_client()
 
     try:
@@ -55,12 +60,12 @@ async def verify_jwt(token: str) -> Dict[str, Any]:
         decoded = jwt.decode(
             token,
             signing_key.key,
-            algorithms=_get_algorithms(),
-            audience=settings.JAVA_BACKEND_JWT_AUDIENCE,
-            issuer=settings.JAVA_BACKEND_JWT_ISSUER,
+            algorithms=algorithms or _get_algorithms(),
+            audience=audience,
+            issuer=issuer,
             options={
-                "verify_aud": settings.JAVA_BACKEND_JWT_AUDIENCE is not None,
-                "verify_iss": settings.JAVA_BACKEND_JWT_ISSUER is not None,
+                "verify_aud": audience is not None,
+                "verify_iss": issuer is not None,
             },
         )
         return decoded
@@ -70,4 +75,35 @@ async def verify_jwt(token: str) -> Dict[str, Any]:
     except Exception as exc:
         logger.error("Unexpected error verifying JWT: %s", exc)
         raise JWTVerificationError("Failed to verify JWT") from exc
+
+
+async def verify_jwt(token: str) -> Dict[str, Any]:
+    """Verify a user JWT issued by the Java backend and return its payload."""
+    return await _decode_jwt(
+        token,
+        audience=settings.JAVA_BACKEND_JWT_AUDIENCE,
+        issuer=settings.JAVA_BACKEND_JWT_ISSUER,
+        algorithms=_get_algorithms(),
+    )
+
+
+async def verify_service_jwt(token: str) -> Dict[str, Any]:
+    """Verify a service-to-service JWT issued by the Java backend."""
+    service_algorithms = getattr(
+        settings,
+        "JAVA_BACKEND_SERVICE_JWT_ALGORITHMS",
+        settings.JAVA_BACKEND_JWT_ALGORITHMS,
+    ) or settings.JAVA_BACKEND_JWT_ALGORITHMS
+    algorithms = [
+        alg.strip()
+        for alg in service_algorithms.split(",")
+        if alg.strip()
+    ] or _get_algorithms()
+
+    return await _decode_jwt(
+        token,
+        audience=getattr(settings, "JAVA_BACKEND_SERVICE_JWT_AUDIENCE", None),
+        issuer=getattr(settings, "JAVA_BACKEND_SERVICE_JWT_ISSUER", None),
+        algorithms=algorithms,
+    )
 

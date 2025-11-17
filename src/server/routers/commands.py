@@ -28,8 +28,6 @@ from src.server.schemas import (
     CommandExecuteResult,
     CommandsListResponse,
     ToolSchema,
-    ErrorResponse,
-    ErrorDetail
 )
 from src.server.routers.agent import TOOLS_REGISTRY
 import logging
@@ -64,7 +62,7 @@ async def list_commands(
         
     Example:
         >>> GET /api/v1/commands
-        >>> Headers: {"x-api-key": "user-api-key"}
+        >>> Headers: {"Authorization": "Bearer <jwt-token>"}
         >>> Response:
         {
             "tools": [
@@ -109,7 +107,6 @@ async def execute_command(
     request: CommandExecuteRequest,
     user: User = Depends(get_current_user),
     x_idempotency_key: Optional[str] = Header(None),
-    x_api_key: str = Header(..., alias="x-api-key"),
 ) -> CommandExecuteResult:
     """지정된 툴을 실행합니다.
     
@@ -132,7 +129,7 @@ async def execute_command(
         request: 툴 실행 요청
             - name: 실행할 툴 이름 (예: "post_blog_article")
             - params: 툴별 파라미터 딕셔너리
-        api_key: 검증된 API 키 (헤더에서 자동 추출 및 검증)
+        user: 인증된 사용자 (JWT에서 자동 추출 및 검증)
         x_idempotency_key: 선택적 Idempotency Key (중복 방지용)
         
     Returns:
@@ -149,7 +146,7 @@ async def execute_command(
     Example (성공):
         >>> POST /api/v1/commands/execute
         >>> Headers: {
-        >>>     "x-api-key": "user-api-key",
+        >>>     "Authorization": "Bearer <jwt-token>",
         >>>     "x-idempotency-key": "abc-123"
         >>> }
         >>> Body: {
@@ -198,9 +195,6 @@ async def execute_command(
         if hasattr(tool_module, "run"):
             # 툴의 run() 메서드 호출 (비동기)
             params = dict(request.params or {})
-
-            if request.name == "post_blog_article":
-                params.setdefault("api_key", x_api_key)
 
             result = await tool_module.run(params)
             

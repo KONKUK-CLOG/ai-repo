@@ -4,8 +4,9 @@ FastAPI + MCP 서버 프로젝트. TypeScript 클라이언트가 보낸 코드 �
 
 ## ✨ 주요 특징
 
-- **🔐 다중 사용자 지원**: GitHub OAuth 2.0 기반 인증, 사용자별 데이터 완전 격리
-- **🔑 사용자별 API 키**: UUID 기반 자동 생성, 간편한 인증
+- **🔐 다중 사용자 지원**: GitHub OAuth 2.0 (Java Auth 서버) + JWT 기반 인증
+- **🔑 사용자별 JWT**: TS 클라이언트가 Java Auth 서버에서 받은 JWT를 Python 서버로 전달
+- **🛡️ 서비스 간 JWT**: Java ↔ Python 서버 간 Bearer 토큰으로 내부 API 보호
 - **REST API Only**: SSE/WebSocket 없이 순수 REST로 구현
 - **Idempotency 지원**: `x-idempotency-key` 헤더로 중복 방지
 - **MCP 툴 노출**: LLM이 안전하게 호출할 수 있는 MCP 프로토콜 지원
@@ -24,10 +25,12 @@ Client → API (single API key) → Vector/Graph DB (no isolation)
 
 ### After (Multi-User) ✅
 ```
-Client → GitHub OAuth → API Key (per-user)
-       ↓
-API (validates user via API key)
-       ↓
+TS Client ── GitHub OAuth ── Java Auth Server
+   │                 │
+   └──JWT (user)─────┘
+        │
+Python API (JWT 검증만 수행)
+        │
 Vector/Graph DB (filtered by user_id)
 ```
 
@@ -35,7 +38,27 @@ Vector/Graph DB (filtered by user_id)
 - Vector DB: `user_id` 필드로 필터링
 - Graph DB: 모든 노드에 `user_id` 속성
 - WAL: 로그 엔트리에 `user_id` 포함
-- API 키: 사용자마다 고유한 UUID 자동 생성
+
+### 🔐 인증 흐름 요약
+1. **TS ↔ Java**: GitHub OAuth + 사용자 JWT 발급 (Python은 관여하지 않음)
+2. **TS → Python**: `Authorization: Bearer <사용자 JWT>` 헤더로 요청
+3. **Python**: JWKS 공개키로 JWT 검증만 수행 (`verify_jwt`)
+4. **Java → Python**: 내부 API 호출 시 서비스 전용 JWT 사용 (`verify_service_jwt`)
+5. **Python → Java**: 사용자 요청은 전달받은 JWT를 그대로 전달, 시스템 작업은 서비스 JWT 사용
+
+> `/auth/github/*` 엔드포인트는 더 이상 제공되지 않으며, GitHub 로그인은 TS ↔ Java 서버 사이에서만 처리됩니다.
+
+### 🛡️ 서비스 간 JWT
+
+| 방향 | 인증 방식 |
+| --- | --- |
+| TS → Python | 사용자 JWT (`Authorization: Bearer <user_jwt>`) |
+| Python → Java (시스템 작업) | 서비스 JWT (`ensure_service_jwt()`로 확보) |
+| Java → Python (내부 API) | 서비스 JWT (`get_java_service_identity` → `verify_service_jwt`) |
+
+- 서비스 JWT는 Java Auth 서버가 발급합니다.
+- Python 서버는 `JAVA_BACKEND_SERVICE_JWT_*` 환경 변수로 검증 파라미터를 설정합니다.
+- 내부 라우트(예: `/api/v1/admin/*`)는 `get_java_service_identity` 의존성으로 보호됩니다.
 
 ## 프로젝트 구조
 
@@ -48,11 +71,11 @@ ts-llm-mcp-bridge/
 │  │  └─ user_repo.py    # User repository (SQLite)
 │  ├─ server/             # FastAPI 서버
 │  │  ├─ main.py         # 앱 엔트리 포인트 + 백그라운드 스케줄러
-│  │  ├─ settings.py     # 환경 설정 (GitHub OAuth 추가)
-│  │  ├─ deps.py         # 의존성 주입 (get_current_user)
+│  │  ├─ settings.py     # 환경 설정 (JWT/JWKS)
+│  │  ├─ deps.py         # 의존성 주입 (get_current_user / get_java_service_identity)
 │  │  ├─ schemas.py      # Pydantic 스키마 (User schemas 추가)
 │  │  └─ routers/        # API 라우터
-│  │     ├─ auth.py      # GitHub OAuth 인증 (NEW)
+│  │     ├─ auth.py      # Auth namespace placeholder (TS ↔ Java에서 처리)
 │  │     ├─ health.py    # 헬스체크
 │  │     ├─ diffs.py     # Diff 적용 (WAL 통합, 다중 사용자 지원)
 │  │     ├─ agent.py     # LLM 에이전트 (다중 사용자 지원)
@@ -85,24 +108,25 @@ ts-llm-mcp-bridge/
 
 ## 🚀 빠른 시작 (다중 사용자)
 
-### 1. GitHub OAuth App 생성
+### 1. Java Auth 서버 준비
 
-1. [GitHub Developer Settings](https://github.com/settings/developers)로 이동
-2. "OAuth Apps" → "New OAuth App" 클릭
-3. 정보 입력:
-   - **Application name**: `Your App Name`
-   - **Homepage URL**: `http://localhost:8000`
-   - **Authorization callback URL**: `http://localhost:8000/auth/github/callback`
-4. **Client ID**와 **Client Secret** 복사
+- GitHub OAuth 플로우와 사용자 JWT 발급은 **Java 백엔드**가 담당합니다.
+- TS 클라이언트는 Java Auth 서버에서 JWT를 받아 로컬에 저장합니다.
+- Python 서버에는 **JWKS URL**과 **issuer/audience** 정보만 제공하면 됩니다.
 
 ### 2. 환경 변수 설정
 
 `.env` 파일 생성:
 ```bash
-# GitHub OAuth (필수)
-GITHUB_CLIENT_ID=your_github_client_id
-GITHUB_CLIENT_SECRET=your_github_client_secret
-GITHUB_REDIRECT_URI=http://localhost:8000/auth/github/callback
+# Java Auth 서버가 제공하는 JWKS 엔드포인트
+JAVA_BACKEND_JWKS_URL=https://java-backend.example.com/.well-known/jwks.json
+JAVA_BACKEND_JWT_ISSUER=https://java-backend.example.com
+JAVA_BACKEND_JWT_AUDIENCE=ts-llm-mcp
+
+# (선택) 서비스 간 JWT 설정
+JAVA_BACKEND_SERVICE_JWT=<static-service-token>
+JAVA_BACKEND_SERVICE_JWT_AUDIENCE=python-internal
+JAVA_BACKEND_SERVICE_JWT_ISSUER=https://java-backend.example.com
 
 # OpenAI (임베딩 생성용)
 OPENAI_API_KEY=your_openai_api_key
@@ -115,24 +139,14 @@ pip install -r requirements.txt
 uvicorn src.server.main:app --reload
 ```
 
-### 4. 사용자 인증
+### 4. API 호출
 
-1. 브라우저에서 `http://localhost:8000/auth/github/login` 접속
-2. GitHub 로그인 및 권한 승인
-3. API 키 발급받기:
-```json
-{
-  "success": true,
-  "api_key": "550e8400-e29b-41d4-a716-446655440000",
-  "user": { "id": 1, "username": "parkj", ... }
-}
-```
-
-### 5. API 호출
+TS 클라이언트에서 받은 사용자 JWT를 그대로 전달합니다.
 
 ```bash
-curl -H "x-api-key: YOUR_API_KEY" \
+curl -H "Authorization: Bearer YOUR_USER_JWT" \
      http://localhost:8000/api/v1/diffs/apply \
+     -H "Content-Type: application/json" \
      -d '{"files": [...]}'
 ```
 
@@ -140,9 +154,8 @@ curl -H "x-api-key: YOUR_API_KEY" \
 
 ### 인증 (Authentication)
 
-- `GET /auth/github/login` - GitHub OAuth 인증 시작
-- `GET /auth/github/callback` - OAuth callback 처리 (API 키 반환)
-- `GET /auth/github/logout` - 로그아웃 안내
+> Python 서버는 더 이상 GitHub OAuth 엔드포인트를 노출하지 않습니다.  
+> 로그인/토큰 발급은 자바 Auth 서버가 담당하며, Python 서버는 `Authorization: Bearer <JWT>` 헤더를 검증만 수행합니다.
 
 ### 헬스체크
 
@@ -243,10 +256,18 @@ curl -H "x-api-key: YOUR_API_KEY" \
 SERVER_HOST=0.0.0.0
 SERVER_PORT=8000
 
-# GitHub OAuth (다중 사용자 인증) - 필수
-GITHUB_CLIENT_ID=your_github_client_id
-GITHUB_CLIENT_SECRET=your_github_client_secret
-GITHUB_REDIRECT_URI=http://localhost:8000/auth/github/callback
+# Java Auth / JWT 검증
+JAVA_BACKEND_BASE_URL=https://java-backend.example.com
+JAVA_BACKEND_JWKS_URL=https://java-backend.example.com/.well-known/jwks.json
+JAVA_BACKEND_JWT_ISSUER=https://java-backend.example.com
+JAVA_BACKEND_JWT_AUDIENCE=ts-llm-mcp
+
+# 서비스 간 JWT (Java ↔ Python)
+JAVA_BACKEND_SERVICE_JWT=<static-service-token>         # 선택: 정적 토큰
+JAVA_BACKEND_SERVICE_JWT_REFRESH_PATH=/api/v1/auth/service-jwt
+JAVA_BACKEND_SERVICE_JWT_ISSUER=https://java-backend.example.com
+JAVA_BACKEND_SERVICE_JWT_AUDIENCE=python-internal
+JAVA_BACKEND_SERVICE_JWT_ALGORITHMS=RS256
 
 # GitHub (git 작업용)
 GITHUB_TOKEN=your-github-token
@@ -281,10 +302,12 @@ ENABLE_DIRECT_TOOLS=false  # true: 개발 환경에서만 활성화
 MAX_DIFF_BYTES=10485760  # 10MB
 ```
 
+> ⚠️ GitHub OAuth 관련 환경 변수(`GITHUB_CLIENT_ID` 등)는 **Java Auth 서버 측**에서만 필요합니다. Python 서버는 JWKS 정보와 서비스 JWT 설정만 알면 됩니다.
+
 ### ⚠️ 중요 변경사항
 
-- **`SERVER_API_KEY` 제거됨**: 이제 사용자별 API 키 사용
-- **GitHub OAuth 필수**: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` 설정 필요
+- **Python 서버는 JWT 검증만 수행**: 사용자 인증/토큰 발급은 Java Auth 서버가 담당
+- **서비스 간 JWT 필요**: Java → Python 내부 API 호출 시 Bearer 토큰 필수
 
 ## 설치 및 실행
 
@@ -298,17 +321,17 @@ pip install -r requirements.txt
 2. **환경 변수 설정**:
 ```bash
 # .env 파일 생성
-cat > .env << EOF
-GITHUB_CLIENT_ID=your_github_client_id
-GITHUB_CLIENT_SECRET=your_github_client_secret
-GITHUB_REDIRECT_URI=http://localhost:8000/auth/github/callback
+cat > .env << 'EOF'
+JAVA_BACKEND_BASE_URL=https://java-backend.example.com
+JAVA_BACKEND_JWKS_URL=https://java-backend.example.com/.well-known/jwks.json
+JAVA_BACKEND_JWT_ISSUER=https://java-backend.example.com
+JAVA_BACKEND_JWT_AUDIENCE=ts-llm-mcp
+JAVA_BACKEND_SERVICE_JWT=<static-service-token>
 OPENAI_API_KEY=your_openai_api_key
 EOF
 ```
 
-**GitHub OAuth App 생성 필수**:
-- [GitHub Developer Settings](https://github.com/settings/developers)에서 OAuth App 생성
-- Client ID와 Secret을 `.env`에 저장
+> GitHub OAuth App 설정은 Java Auth 서버 측에서만 필요합니다.
 
 **OpenAI API 키 (선택사항)**:
 - [OpenAI API Keys](https://platform.openai.com/api-keys)에서 키 발급
@@ -326,11 +349,7 @@ ENABLE_DIRECT_TOOLS=true  # 개발 시 툴 직접 테스트
 uvicorn src.server.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-4. **사용자 인증**:
-- 브라우저에서 `http://localhost:8000/auth/github/login` 접속
-- GitHub 로그인 후 API 키 발급
-
-5. **API 문서 접속**:
+4. **API 문서 접속**:
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
@@ -361,39 +380,23 @@ pytest tests/test_health.py
 
 ## 사용 예시
 
-### 1. 사용자 인증
+### 1. 사용자 JWT 전달
+
+TS 클라이언트가 Java Auth 서버에서 받은 JWT를 사용합니다.
 
 ```bash
-# 1단계: GitHub OAuth 시작
-curl http://localhost:8000/auth/github/login
-# → GitHub 로그인 페이지로 리다이렉트
-
-# 2단계: 승인 후 callback에서 API 키 발급
-# Response:
-{
-  "success": true,
-  "api_key": "550e8400-e29b-41d4-a716-446655440000",
-  "user": {
-    "id": 1,
-    "github_id": 12345678,
-    "username": "parkj",
-    "email": "parkj@example.com"
-  }
-}
+export USER_JWT="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
 
-### 2. API 호출 (인증된 사용자)
+### 2. API 호출 (JWT 기반)
 
 ```bash
-# API 키를 환경 변수로 설정
-export API_KEY="550e8400-e29b-41d4-a716-446655440000"
-
 # 헬스체크
 curl http://localhost:8000/healthz
 
 # Diff 적용 (사용자별로 격리됨)
 curl -X POST http://localhost:8000/api/v1/diffs/apply \
-  -H "x-api-key: $API_KEY" \
+  -H "Authorization: Bearer $USER_JWT" \
   -H "Content-Type: application/json" \
   -d '{
     "files": [
@@ -406,12 +409,12 @@ curl -X POST http://localhost:8000/api/v1/diffs/apply \
   }'
 
 # 명령 목록 조회
-curl -H "x-api-key: $API_KEY" \
+curl -H "Authorization: Bearer $USER_JWT" \
      http://localhost:8000/api/v1/commands
 
 # 블로그 포스트 발행
 curl -X POST http://localhost:8000/api/v1/commands/execute \
-  -H "x-api-key: $API_KEY" \
+  -H "Authorization: Bearer $USER_JWT" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "post_blog_article",
@@ -423,7 +426,7 @@ curl -X POST http://localhost:8000/api/v1/commands/execute \
 
 # LLM 에이전트로 자연어 명령 실행
 curl -X POST http://localhost:8000/api/v1/llm/execute \
-  -H "x-api-key: $API_KEY" \
+  -H "Authorization: Bearer $USER_JWT" \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "코드 변경사항을 인덱스에 반영하고 블로그 글도 써줘",
@@ -442,18 +445,12 @@ import httpx
 
 API_URL = "http://localhost:8000"
 
-async def authenticate_with_github():
-    """GitHub OAuth로 인증하고 API 키 발급받기"""
-    # 1. 브라우저에서 수동으로 /auth/github/login 접속
-    # 2. API 키를 받아서 저장
-    return "your-api-key-here"
-
-async def post_article(api_key: str, title: str, markdown: str):
+async def post_article(user_jwt: str, title: str, markdown: str):
     """블로그 글 발행"""
     async with httpx.AsyncClient() as client:
         response = await client.post(
             f"{API_URL}/api/v1/commands/execute",
-            headers={"x-api-key": api_key},
+            headers={"Authorization": f"Bearer {user_jwt}"},
             json={
                 "name": "post_blog_article",
                 "params": {
@@ -464,18 +461,18 @@ async def post_article(api_key: str, title: str, markdown: str):
         )
         return response.json()
 
-async def apply_diff(api_key: str, files: list):
+async def apply_diff(user_jwt: str, files: list):
     """코드 diff 적용 (사용자별로 격리됨)"""
     async with httpx.AsyncClient() as client:
         response = await client.post(
             f"{API_URL}/api/v1/diffs/apply",
-            headers={"x-api-key": api_key},
+            headers={"Authorization": f"Bearer {user_jwt}"},
             json={"files": files}
         )
         return response.json()
 
 async def execute_natural_language_command(
-    api_key: str, 
+    user_jwt: str, 
     prompt: str, 
     context: dict = None
 ):
@@ -483,7 +480,7 @@ async def execute_natural_language_command(
     async with httpx.AsyncClient() as client:
         response = await client.post(
             f"{API_URL}/api/v1/llm/execute",
-            headers={"x-api-key": api_key},
+            headers={"Authorization": f"Bearer {user_jwt}"},
             json={
                 "prompt": prompt,
                 "context": context or {},
@@ -494,11 +491,11 @@ async def execute_natural_language_command(
 
 # 사용 예시
 async def main():
-    # API 키는 GitHub OAuth로 발급받아 저장
-    api_key = "550e8400-e29b-41d4-a716-446655440000"
+    # 사용자 JWT (TS ↔ Java Auth 서버에서 발급받아 저장)
+    user_jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
     
     # Diff 적용
-    result = await apply_diff(api_key, [
+    result = await apply_diff(user_jwt, [
         {
             "path": "src/main.py",
             "status": "modified",
@@ -557,12 +554,12 @@ RETURN f
 
 ```bash
 # User 1: 파일 업로드
-curl -X POST -H "x-api-key: user1_key" \
+curl -X POST -H "Authorization: Bearer user1_jwt" \
      -d '{"files":[{"path":"test.py","status":"modified","after":"print(1)"}]}' \
      http://localhost:8000/api/v1/diffs/apply
 
 # User 2: 같은 경로에 다른 파일 업로드
-curl -X POST -H "x-api-key: user2_key" \
+curl -X POST -H "Authorization: Bearer user2_jwt" \
      -d '{"files":[{"path":"test.py","status":"modified","after":"print(2)"}]}' \
      http://localhost:8000/api/v1/diffs/apply
 
@@ -693,15 +690,15 @@ data/
 
 ## 🔧 문제 해결
 
-### "Invalid API key" 에러
-- API 키가 올바른지 확인
-- `x-api-key` 헤더에 정확히 전달되었는지 확인
-- DB에서 사용자 확인: `sqlite3 data/users.db "SELECT * FROM users;"`
+### "Invalid or expired token" 에러
+- 사용자 JWT가 만료되었는지 확인 (`exp` 클레임)
+- TS ↔ Java Auth 서버에서 새 JWT를 발급받아 전송
+- Python 로그(`get_current_user`)에서 상세 에러 확인
 
-### GitHub OAuth 실패
-- `GITHUB_CLIENT_ID`와 `GITHUB_CLIENT_SECRET` 확인
-- GitHub OAuth App의 callback URL이 일치하는지 확인
-- 로그에서 에러 메시지 확인
+### 서비스 토큰 오류
+- Java → Python 호출 시 서비스 JWT 사용 여부 확인
+- `JAVA_BACKEND_SERVICE_JWT_*` 환경 변수가 올바른지 검증
+- 필요 시 `refresh_service_jwt()`로 재발급
 
 ### 데이터가 격리되지 않음
 - 모든 DB 작업에 `user_id`가 전달되는지 로그 확인
