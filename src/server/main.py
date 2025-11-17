@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.server.routers import health, diffs, agent, auth
 from src.server.settings import settings
+from src.adapters.service_token_manager import service_token_manager
 from src.background.scheduler import start_scheduler, shutdown_scheduler, run_task_now
 from src.server.deps import get_java_service_identity
 
@@ -28,11 +29,16 @@ async def lifespan(app: FastAPI):
     # 백그라운드 스케줄러 시작
     start_scheduler()
     logger.info("Background scheduler started")
+
+    # 서비스 토큰 매니저 초기화
+    await service_token_manager.startup()
+    logger.info("Service token manager initialized")
     
     yield
     
     # 종료 시
     logger.info("Shutting down application...")
+    await service_token_manager.shutdown()
     shutdown_scheduler()
     logger.info("Background scheduler stopped")
 

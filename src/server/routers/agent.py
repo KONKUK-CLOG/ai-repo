@@ -11,10 +11,8 @@ from src.server.settings import settings
 from openai import AsyncOpenAI
 from src.mcp.tools import (
     post_blog_article,
-    publish_to_notion,
-    create_commit_and_push,
     search_vector_db,
-    search_graph_db
+    search_graph_db,
 )
 import logging
 import json
@@ -30,8 +28,6 @@ logger = logging.getLogger(__name__)
 # agent.py와 commands.py에서 공유하여 사용
 TOOLS_REGISTRY = {
     "post_blog_article": post_blog_article,           # 블로그 글 발행
-    "publish_to_notion": publish_to_notion,           # Notion 페이지 발행
-    "create_commit_and_push": create_commit_and_push, # Git 커밋 & 푸시
     "search_vector_db": search_vector_db,             # Vector DB 의미론적 검색
     "search_graph_db": search_graph_db,               # Graph DB 구조적 검색
 }
@@ -104,8 +100,6 @@ async def call_llm_with_tools(
 - search_vector_db: 코드베이스에서 의미론적으로 유사한 코드 검색 (임베딩 기반)
 - search_graph_db: 코드 엔티티(함수/클래스)와 관계 구조 검색 (그래프 기반)
 - post_blog_article: 블로그에 글 발행
-- publish_to_notion: Notion에 페이지 발행
-- create_commit_and_push: Git 커밋 후 푸시
 
 RAG 도구 사용 가이드:
 - 블로그 글 작성이나 코드 설명이 필요한 경우, 먼저 RAG 도구로 관련 코드를 검색하세요
@@ -208,22 +202,21 @@ def _fallback_tool_selection(prompt: str, context: dict) -> tuple[str, list[dict
             }
         })
     
-    if "노션" in prompt_lower or "notion" in prompt_lower:
+    if any(keyword in prompt_lower for keyword in ["검색", "search", "코드", "찾아"]):
         tool_calls.append({
-            "tool": "publish_to_notion",
+            "tool": "search_vector_db",
             "params": {
-                "title": "자동 생성 페이지",
-                "content": prompt
+                "query": context.get("query") or prompt,
+                "top_k": context.get("top_k", 10)
             }
         })
     
-    if "커밋" in prompt_lower or "commit" in prompt_lower or "push" in prompt_lower:
+    if any(keyword in prompt_lower for keyword in ["그래프", "graph", "관계", "호출"]):
         tool_calls.append({
-            "tool": "create_commit_and_push",
+            "tool": "search_graph_db",
             "params": {
-                "repo_path": context.get("repo_path", "."),
-                "files": context.get("files", []),
-                "commit_message": "Auto commit"
+                "query": context.get("graph_query") or context.get("query") or prompt,
+                "limit": context.get("limit", 10)
             }
         })
     

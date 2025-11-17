@@ -86,7 +86,7 @@ sequenceDiagram
 
 2. **Diff Application with WAL**: VSCode extension sends code changes to the server. All updates are logged to WAL first (Write-Ahead Log), then processed by Vector DB for semantic search and Graph DB for code relationships. Failed operations are automatically retried.
 
-3. **MCP Tool Execution**: Claude Desktop communicates with the MCP Server via JSON-RPC over stdio. Tools include blog posting, Notion publishing, and Git operations.
+3. **MCP Tool Execution**: Claude Desktop communicates with the MCP Server via JSON-RPC over stdio. Tools include blog posting plus Vector/Graph database searches.
 
 4. **Background Recovery**: A scheduler runs every 5 minutes to retry failed WAL operations, ensuring data consistency and reliability.
 
@@ -150,16 +150,6 @@ classDiagram
         +run(arguments)
     }
 
-    class PublishNotionTool {
-        +TOOL
-        +run(arguments)
-    }
-
-    class GitCommitTool {
-        +TOOL
-        +run(arguments)
-    }
-
     class SearchVectorTool {
         +TOOL
         +run(arguments)
@@ -190,11 +180,6 @@ classDiagram
     class BlogAPIAdapter {
         +post_article()
         +update_article()
-    }
-
-    class NotionAdapter {
-        +create_page()
-        +update_page()
     }
 
     class GitHubAdapter {
@@ -265,14 +250,10 @@ classDiagram
 
     MCPServer --> ToolRegistry
     ToolRegistry --> PostBlogTool
-    ToolRegistry --> PublishNotionTool
-    ToolRegistry --> GitCommitTool
     ToolRegistry --> SearchVectorTool
     ToolRegistry --> SearchGraphTool
 
     PostBlogTool --> BlogAPIAdapter
-    PublishNotionTool --> NotionAdapter
-    GitCommitTool --> GitHubAdapter
     SearchVectorTool --> VectorDBAdapter
     SearchGraphTool --> GraphDBAdapter
 
@@ -298,14 +279,13 @@ classDiagram
 #### MCP Server
 - **MCPServer**: Stdio-based JSON-RPC 2.0 server for LLM integration
 - **ToolRegistry**: Central registry of available tools and their executors
-- **Tools**: Individual tool implementations for blog, Notion, Git, Vector DB, and Graph DB operations
+- **Tools**: Individual tool implementations for blog posting plus Vector/Graph DB searches
 
 #### Adapters
 - **VectorDBAdapter**: Qdrant client for semantic search with OpenAI embeddings
 - **GraphDBAdapter**: Neo4j client for code relationship tracking with AST parsing
 - **BlogAPIAdapter**: Blog posting functionality
-- **NotionAdapter**: Notion page creation and updates
-- **GitHubAdapter**: GitHub OAuth and Git operations
+- **GitHubAdapter**: GitHub OAuth integration
 
 #### Background Processing
 - **BackgroundScheduler**: APScheduler for periodic tasks

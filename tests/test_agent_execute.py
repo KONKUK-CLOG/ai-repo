@@ -59,47 +59,34 @@ def test_execute_llm_command_with_blog_request(client, api_headers, mock_user_re
 
 
 def test_execute_llm_command_with_multiple_tasks(client, api_headers, mock_user_repo, mock_openai_chat, mock_tools):
-    """LLM이 여러 작업을 동시에 처리하는지 테스트.
+    """LLM이 블로그 작성과 코드 검색을 조합해 처리하는지 테스트.
     
-    Given: 사용자가 여러 작업을 한 번에 요청하고
+    Given: 사용자가 블로그 발행과 코드 검색을 동시에 요청하고
     When: LLM에 전달하면
-    Then: 필요한 모든 툴을 선택하고 순서대로 실행해야 함
-    
-    검증사항:
-    - HTTP 200 응답
-    - tool_calls에 여러 툴 포함
-    - 각 툴이 적절히 실행됨
-    - 작업 간 의존성 고려
-    
-    설명:
-    - "블로그 쓰고 Notion에도 발행해줘" → 2개 툴 실행
-    - LLM이 작업을 분석하고 필요한 툴들을 결정
-    - 각 툴을 순차적으로 실행
+    Then: 블로그 툴과 검색 툴을 모두 실행해야 함
     """
-    # Given: 여러 작업 요청
     request_data = {
-        "prompt": "블로그 글도 쓰고 Notion에도 발행해줘",
+        "prompt": "블로그 글도 쓰고 관련 코드 검색 결과도 보여줘",
         "context": {
-            "project": "test-project"
+            "project": "test-project",
+            "query": "검색할 키워드"
         }
     }
     
-    # When: LLM 에이전트 실행
     response = client.post(
         "/api/v1/llm/execute",
         json=request_data,
         headers=api_headers
     )
     
-    # Then: 여러 툴이 실행됨
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is True
-    assert len(data["tool_calls"]) >= 2  # Should call multiple tools
+    assert len(data["tool_calls"]) >= 2
     
     tool_names = [tc["tool"] for tc in data["tool_calls"]]
     assert "post_blog_article" in tool_names
-    assert "publish_to_notion" in tool_names
+    assert "search_vector_db" in tool_names
 
 
 def test_execute_llm_command_with_custom_model(client, api_headers, mock_user_repo, mock_openai_chat, mock_tools):
