@@ -61,16 +61,17 @@ async def list_commands() -> CommandsListResponse:
         {
             "tools": [
                 {
-                    "name": "post_blog_article",
-                    "title": "Post Blog Article",
-                    "description": "Publish an article to the blog platform",
+                    "name": "get_user_blog_posts",
+                    "title": "Get User Blog Posts",
+                    "description": "Retrieve user's blog post history",
                     "input_schema": {
                         "type": "object",
                         "properties": {
-                            "title": {"type": "string"},
-                            "markdown": {"type": "string"}
+                            "user_id": {"type": "integer"},
+                            "limit": {"type": "integer"},
+                            "offset": {"type": "integer"}
                         },
-                        "required": ["title", "markdown"]
+                        "required": ["user_id"]
                     }
                 },
                 ...
@@ -121,7 +122,7 @@ async def execute_command(
     Args:
         request: 툴 실행 요청
             - user_id: Java 서버에서 전달된 사용자 ID (필수)
-            - name: 실행할 툴 이름 (예: "post_blog_article")
+            - name: 실행할 툴 이름 (예: "get_user_blog_posts")
             - params: 툴별 파라미터 딕셔너리
         x_idempotency_key: 선택적 Idempotency Key (중복 방지용)
         
@@ -143,22 +144,29 @@ async def execute_command(
         >>> }
         >>> Body: {
         >>>     "user_id": 123,
-        >>>     "name": "post_blog_article",
+        >>>     "name": "get_user_blog_posts",
         >>>     "params": {
-        >>>         "title": "FastAPI 시작하기",
-        >>>         "markdown": "# FastAPI\\n\\n빠르고 현대적인 웹 프레임워크"
+        >>>         "user_id": 123,
+        >>>         "limit": 10,
+        >>>         "offset": 0
         >>>     }
         >>> }
         >>> Response: {
         >>>     "ok": true,
-        >>>     "tool": "post_blog_article",
+        >>>     "tool": "get_user_blog_posts",
         >>>     "result": {
-        >>>         "success": true,
-        >>>         "article": {
-        >>>             "article_id": "123",
-        >>>             "url": "https://...",
-        >>>             "published": true
-        >>>         }
+        >>>         "posts": [
+        >>>             {
+        >>>                 "id": "123",
+        >>>                 "title": "FastAPI 시작하기",
+        >>>                 "content": "# FastAPI\\n\\n빠르고 현대적인 웹 프레임워크",
+        >>>                 "tags": ["python", "web"],
+        >>>                 "created_at": "2024-01-01T00:00:00Z"
+        >>>             }
+        >>>         ],
+        >>>         "total": 50,
+        >>>         "limit": 10,
+        >>>         "offset": 0
         >>>     }
         >>> }
     

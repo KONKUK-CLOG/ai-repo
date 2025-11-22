@@ -4,7 +4,7 @@ This document contains Mermaid diagrams visualizing the architecture and workflo
 
 ## LLM Agent Flow - Class Diagram
 
-The following class diagram illustrates the LLM agent flow from Java server request to blog publishing:
+The following class diagram illustrates the LLM agent flow from Java server request to blog draft generation:
 
 ```mermaid
 classDiagram
@@ -12,6 +12,7 @@ classDiagram
     class JavaServer {
         +POST /internal/v1/llm/execute
         +receive_llm_response()
+        +GET /api/v1/blog/posts
     }
 
     %% FastAPI Router Layer
@@ -34,12 +35,12 @@ classDiagram
 
     %% Tool Registry
     class TOOLS_REGISTRY {
-        +post_blog_article: PostBlogArticleTool
+        +get_user_blog_posts: GetUserBlogPostsTool
         +get_available_tools()
     }
 
     %% MCP Tool
-    class PostBlogArticleTool {
+    class GetUserBlogPostsTool {
         +TOOL: dict
         +run(params: Dict) Dict
         +validate_params(params)
@@ -47,11 +48,11 @@ classDiagram
 
     %% Adapter Layer
     class BlogAPIAdapter {
-        +publish_article(title, markdown, tags, api_key) Dict
+        +get_user_articles(user_id, limit, offset) Dict
     }
 
     class JavaBackendAdapter {
-        +create_blog_post(api_key, payload) Dict
+        +get_user_blog_posts(user_id, limit, offset) Dict
         +_request(method, path, json_body, headers) Dict
     }
 
@@ -81,7 +82,6 @@ classDiagram
 
     class Settings {
         +OPENAI_API_KEY: str
-        +BLOG_API_KEY: str
         +DEFAULT_LLM_MODEL: str
         +LLM_TEMPERATURE: float
         +LLM_MAX_TOKENS: int
@@ -99,10 +99,9 @@ classDiagram
     LLMService --> TOOLS_REGISTRY
     LLMService ..> AgentRouter
 
-    TOOLS_REGISTRY --> PostBlogArticleTool
-    AgentRouter --> PostBlogArticleTool
-    PostBlogArticleTool --> BlogAPIAdapter
-    PostBlogArticleTool --> Settings
+    TOOLS_REGISTRY --> GetUserBlogPostsTool
+    AgentRouter --> GetUserBlogPostsTool
+    GetUserBlogPostsTool --> BlogAPIAdapter
     BlogAPIAdapter --> JavaBackendAdapter
     JavaBackendAdapter --> JavaServer
 
@@ -119,6 +118,18 @@ classDiagram
     classDef javaAdapter fill:#e67e22,stroke:#d35400,stroke-width:3px,color:#fff
     classDef dataModel fill:#95a5a6,stroke:#7f8c8d,stroke-width:3px,color:#fff
     classDef settings fill:#34495e,stroke:#2c3e50,stroke-width:3px,color:#fff
+    
+    class JavaServer javaServer
+    class AgentRouter agentRouter
+    class LLMService llmService
+    class TOOLS_REGISTRY toolRegistry
+    class GetUserBlogPostsTool blogTool
+    class BlogAPIAdapter blogAdapter
+    class JavaBackendAdapter javaAdapter
+    class LLMExecuteRequest dataModel
+    class LLMExecuteResult dataModel
+    class ToolCall dataModel
+    class Settings settings
 
 ```
 
@@ -133,7 +144,7 @@ sequenceDiagram
     participant AgentRouter as AgentRouter<br/>(Python)
     participant LLMService as LLM Service<br/>(OpenAI)
     participant ToolRegistry as TOOLS_REGISTRY
-    participant BlogTool as PostBlogArticleTool
+    participant BlogTool as GetUserBlogPostsTool
     participant BlogAPI as BlogAPIAdapter
     participant JavaBackend as JavaBackendAdapter
 
@@ -142,25 +153,27 @@ sequenceDiagram
         Note over JavaServer,JavaBackend: LLM Request Processing Flow
         JavaServer->>AgentRouter: POST /internal/v1/llm/execute<br/>{user_id, prompt, context}
         AgentRouter->>ToolRegistry: Get available tools
-        ToolRegistry-->>AgentRouter: [post_blog_article]
+        ToolRegistry-->>AgentRouter: [get_user_blog_posts]
         
         AgentRouter->>LLMService: call_llm_with_tools(prompt, context, tools)
-        Note over LLMService: System Prompt:<br/>"요청을 분석하여<br/>블로그 게시 필요 여부 판단"
-        LLMService->>LLMService: Analyze request<br/>(블로그 게시 필요?)
+        Note over LLMService: System Prompt:<br/>"블로그 글 참고 필요 시<br/>get_user_blog_posts 호출"
+        LLMService->>LLMService: Analyze request<br/>(블로그 기록 참고 필요?)
         
-        alt 블로그 게시 필요
-            LLMService-->>AgentRouter: tool_calls: [post_blog_article]
-            AgentRouter->>BlogTool: run({title, markdown, tags})
-            BlogTool->>BlogAPI: publish_article(title, markdown, tags, api_key)
-            BlogAPI->>JavaBackend: create_blog_post(api_key, payload)
-            JavaBackend->>JavaServer: POST /api/v1/blog/posts<br/>(X-User-Api-Key header)
-            JavaServer-->>JavaBackend: {article_id, url, ...}
-            JavaBackend-->>BlogAPI: Blog post result
-            BlogAPI-->>BlogTool: {success: true, article: {...}}
-            BlogTool-->>AgentRouter: Tool execution result
+        alt 블로그 기록 참고 필요
+            LLMService-->>AgentRouter: tool_calls: [get_user_blog_posts]
+            AgentRouter->>AgentRouter: Auto-inject user_id<br/>from request
+            AgentRouter->>BlogTool: run({user_id, limit, offset})
+            BlogTool->>BlogAPI: get_user_articles(user_id, limit, offset)
+            BlogAPI->>JavaBackend: get_user_blog_posts(user_id, limit, offset)
+            JavaBackend->>JavaServer: GET /api/v1/blog/posts<br/>?user_id={user_id}&limit={limit}&offset={offset}
+            JavaServer-->>JavaBackend: {posts: [...], total, limit, offset}
+            JavaBackend-->>BlogAPI: Blog posts result
+            BlogAPI-->>BlogTool: {posts: [...], total, limit, offset}
+            BlogTool-->>AgentRouter: Tool execution result<br/>(user's blog history)
             AgentRouter->>LLMService: _generate_final_response(prompt, tool_calls)
-            LLMService-->>AgentRouter: Final response text
-        else 블로그 게시 불필요
+            Note over LLMService: LLM analyzes user's<br/>blog style and generates<br/>markdown draft
+            LLMService-->>AgentRouter: Final response<br/>(markdown blog draft)
+        else 블로그 기록 참고 불필요
             LLMService-->>AgentRouter: tool_calls: []<br/>(no tools)
             Note over AgentRouter: LLM이 직접 답변 생성
             AgentRouter->>LLMService: _generate_final_response(prompt, [])
@@ -168,7 +181,8 @@ sequenceDiagram
         end
         
         AgentRouter->>AgentRouter: Create LLMExecuteResult<br/>{ok, thought, tool_calls, final_response}
-        AgentRouter-->>JavaServer: HTTP 200<br/>LLMExecuteResult
+        AgentRouter-->>JavaServer: HTTP 200<br/>LLMExecuteResult<br/>(markdown draft, not published)
+        Note over JavaServer: 사용자가 마크다운 초안을<br/>확인/수정 후 Java 서버로<br/>직접 게시 요청
     end
 ```
 
@@ -179,34 +193,41 @@ sequenceDiagram
 - **call_llm_with_tools**: Calls OpenAI API with system prompt and available tools
 - **_execute_regular_tool**: Executes a tool from the registry
 - **_generate_final_response**: Generates user-friendly final response using LLM
+- **Auto-inject user_id**: Automatically injects `user_id` from request into `get_user_blog_posts` tool calls
 
 ### LLMService
-- **System Prompt**: Instructs LLM to analyze requests and decide if blog publishing is needed
-- **Tool Selection**: LLM decides whether to use `post_blog_article` tool or respond directly
-- **Response Generation**: Creates final response based on tool execution results
+- **System Prompt**: Instructs LLM to analyze requests and call `get_user_blog_posts` when user's blog history should be referenced
+- **Tool Selection**: LLM decides whether to use `get_user_blog_posts` tool based on whether blog history reference is needed
+- **Response Generation**: Creates final response (markdown blog draft) based on tool execution results and user's blog style
 
-### PostBlogArticleTool
+### GetUserBlogPostsTool
 - **TOOL**: Tool metadata (name, description, input_schema)
-- **run**: Executes blog publishing with title, markdown, and tags
-- Uses `settings.BLOG_API_KEY` from Python server .env
+- **run**: Retrieves user's blog post history with user_id, limit, and offset parameters
+- Returns blog posts with metadata (title, content, tags, created_at, etc.)
 
 ### BlogAPIAdapter
-- **publish_article**: Publishes article via Java backend
-- Validates API key and formats payload
+- **get_user_articles**: Retrieves user's blog articles via Java backend
+- Handles error cases and logging
+- Returns blog posts list with pagination metadata
 
 ### JavaBackendAdapter
-- **create_blog_post**: Sends HTTP POST request to Java server blog API
-- Uses `X-User-Api-Key` header for authentication
+- **get_user_blog_posts**: Sends HTTP GET request to Java server blog API
+- Endpoint: `GET /api/v1/blog/posts?user_id={user_id}&limit={limit}&offset={offset}`
+- Internal communication (no JWT required)
 
 ## Decision Flow
 
 1. **Java Server** sends LLM request with `user_id`, `prompt`, and `context`
 2. **AgentRouter** receives request and gets available tools from registry
 3. **LLMService** analyzes the request using system prompt:
-   - If blog publishing is needed (explicit request like "블로그에 올려줘"): Selects `post_blog_article` tool
-   - If not needed (simple question): Responds directly without tools
-4. **If tool selected**: Tool executes → BlogAPIAdapter → JavaBackendAdapter → Java Server
-5. **Final response**: LLM generates user-friendly response and returns to Java Server
+   - If user's blog history should be referenced (blog writing request, style matching needed, etc.): Selects `get_user_blog_posts` tool
+   - If not needed (simple question unrelated to blog): Responds directly without tools
+4. **If tool selected**: 
+   - AgentRouter auto-injects `user_id` from request
+   - Tool executes → BlogAPIAdapter → JavaBackendAdapter → Java Server (GET request)
+   - Returns user's blog post history
+5. **Final response**: LLM analyzes user's blog style and generates markdown blog draft (not published)
+6. **User action**: User reviews/edits the draft and publishes directly to Java server (Python server not involved in publishing)
 
 ---
 
@@ -376,7 +397,7 @@ sequenceDiagram
         Note over JavaServer,Neo4j: RAG: Vector DB Semantic Search (다음 학기 구현 예정)
         JavaServer->>AgentRouter: POST /internal/v1/llm/execute<br/>{user_id, prompt: "사용자 인증 로직 찾아줘"}
         AgentRouter->>ToolRegistry: Get available tools
-        ToolRegistry-->>AgentRouter: [post_blog_article,<br/>search_vector_db,<br/>search_graph_db]
+        ToolRegistry-->>AgentRouter: [get_user_blog_posts,<br/>search_vector_db,<br/>search_graph_db]
         
         AgentRouter->>LLMService: call_llm_with_tools(prompt, context, tools)
         Note over LLMService: System Prompt:<br/>"RAG 도구로 관련 코드 검색 후<br/>블로그 글 작성"
@@ -424,7 +445,7 @@ sequenceDiagram
         JavaServer->>AgentRouter: POST /internal/v1/llm/execute<br/>{user_id, prompt: "사용자 인증 관련 코드를<br/>찾아서 블로그 글 작성해줘"}
         AgentRouter->>LLMService: call_llm_with_tools(prompt, context, tools)
         LLMService->>LLMService: Analyze request<br/>(코드 검색 + 블로그 작성)
-        LLMService-->>AgentRouter: tool_calls: [search_vector_db,<br/>search_graph_db,<br/>post_blog_article]
+        LLMService-->>AgentRouter: tool_calls: [search_vector_db,<br/>search_graph_db,<br/>get_user_blog_posts]
         
         par Vector DB Search
             AgentRouter->>VectorTool: run({query: "사용자 인증", user_id})
@@ -440,14 +461,23 @@ sequenceDiagram
             Neo4j-->>GraphDB: Results
             GraphDB-->>GraphTool: Results
             GraphTool-->>AgentRouter: Graph search results
+        and Blog History Retrieval
+            AgentRouter->>BlogTool: run({user_id, limit, offset})
+            BlogTool->>BlogAPI: get_user_articles(...)
+            BlogAPI->>JavaBackend: get_user_blog_posts(...)
+            JavaBackend->>JavaServer: GET /api/v1/blog/posts
+            JavaServer-->>JavaBackend: User's blog posts
+            JavaBackend-->>BlogAPI: Blog history
+            BlogAPI-->>BlogTool: Blog posts
+            BlogTool-->>AgentRouter: User's blog history
         end
         
         AgentRouter->>LLMService: _generate_final_response(prompt, tool_calls)
-        Note over LLMService: LLM combines Vector + Graph<br/>results as context
-        LLMService-->>AgentRouter: Response with code context
+        Note over LLMService: LLM combines Vector + Graph<br/>results + user's blog style<br/>as context
+        LLMService-->>AgentRouter: Markdown blog draft<br/>(not published)
         
-        AgentRouter->>AgentRouter: Execute post_blog_article<br/>with code context
-        AgentRouter-->>JavaServer: LLMExecuteResult<br/>{tool_calls, final_response}
+        AgentRouter-->>JavaServer: LLMExecuteResult<br/>{tool_calls, final_response:<br/>markdown draft}
+        Note over JavaServer: User reviews/edits draft<br/>and publishes directly
     end
 ```
 

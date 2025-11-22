@@ -26,7 +26,7 @@ import sys
 import logging
 from typing import Dict, Any, List
 from src.mcp.tools import (
-    post_blog_article,
+    get_user_blog_posts,
     # 주석 처리: RAG 관련 툴은 다음 학기 구현 예정
     # search_vector_db,
     # search_graph_db
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # Tool registry (도구 레지스트리)
 # 각 도구는 TOOL(메타데이터)과 run(실행 함수)를 제공
 TOOLS = [
-    post_blog_article.TOOL,         # 블로그 글 게시
+    get_user_blog_posts.TOOL,       # 사용자 블로그 포스트 조회
     # 주석 처리: RAG 관련 툴은 다음 학기 구현 예정
     # search_vector_db.TOOL,           # Vector DB 의미론적 검색
     # search_graph_db.TOOL,            # Graph DB 구조적 검색
@@ -47,7 +47,7 @@ TOOLS = [
 # Tool executors (도구 실행 함수 매핑)
 # tool_name → async run(arguments) 함수
 TOOL_EXECUTORS = {
-    "post_blog_article": post_blog_article.run,
+    "get_user_blog_posts": get_user_blog_posts.run,
     # 주석 처리: RAG 관련 툴은 다음 학기 구현 예정
     # "search_vector_db": search_vector_db.run,
     # "search_graph_db": search_graph_db.run,

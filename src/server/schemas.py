@@ -244,7 +244,7 @@ class LLMExecuteRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "user_id": 123,
-                "prompt": "이 코드 변경 내용을 요약해서 블로그에 올려줘",
+                "prompt": "이 코드 변경 내용을 요약해서 블로그 글 초안을 작성해줘",
                 "context": {
                     "code_changes": "새로운 기능 추가: 사용자 인증 로직 구현"
                 },
@@ -264,9 +264,9 @@ class ToolCall(BaseModel):
     
     Example:
         >>> tool_call = ToolCall(
-        ...     tool="post_blog_article",
-        ...     params={"title": "My Article", "markdown": "..."},
-        ...     result={"article_id": "123", "url": "..."},
+        ...     tool="get_user_blog_posts",
+        ...     params={"user_id": 123, "limit": 10, "offset": 0},
+        ...     result={"posts": [...], "total": 50, "limit": 10, "offset": 0},
         ...     success=True
         ... )
     """
@@ -291,12 +291,12 @@ class LLMExecuteResult(BaseModel):
     Example:
         >>> result = LLMExecuteResult(
         ...     ok=True,
-        ...     thought="사용자가 블로그 발행을 요청했음",
+        ...     thought="사용자가 블로그 글 작성을 요청했음. 사용자의 블로그 기록을 조회하여 스타일을 파악함",
         ...     tool_calls=[
-        ...         ToolCall(tool="post_blog_article", ...)
+        ...         ToolCall(tool="get_user_blog_posts", ...)
         ...     ],
-        ...     final_response="블로그 글을 발행했습니다.",
-        ...     model_used="claude-3-5-sonnet"
+        ...     final_response="# 블로그 글 제목\\n\\n마크다운 형식의 블로그 내용...",
+        ...     model_used="gpt-4-turbo-preview"
         ... )
     """
     ok: bool
@@ -377,16 +377,17 @@ class CommandExecuteRequest(BaseModel):
     Attributes:
         user_id: Java 서버에서 전달된 사용자 ID (필수)
         name: 실행할 툴의 이름
-            가능한 값: "post_blog_article"
+            가능한 값: "get_user_blog_posts"
         params: 툴별 파라미터 딕셔너리
     
     Example:
         >>> request = CommandExecuteRequest(
         ...     user_id=123,
-        ...     name="post_blog_article",
+        ...     name="get_user_blog_posts",
         ...     params={
-        ...         "title": "My Article",
-        ...         "markdown": "# Hello World"
+        ...         "user_id": 123,
+        ...         "limit": 10,
+        ...         "offset": 0
         ...     }
         ... )
     """
@@ -416,14 +417,14 @@ class CommandExecuteResult(BaseModel):
         ok: 실행 성공 여부
         tool: 실행된 툴의 이름
         result: 툴 실행 결과 (툴마다 다른 형식)
-            - post_blog_article: {"success": True, "article": {...}}
+            - get_user_blog_posts: {"posts": [...], "total": int, "limit": int, "offset": int}
             - 등등
     
     Example:
         >>> result = CommandExecuteResult(
         ...     ok=True,
-        ...     tool="post_blog_article",
-        ...     result={"success": True, "article_id": "123"}
+        ...     tool="get_user_blog_posts",
+        ...     result={"posts": [...], "total": 50, "limit": 10, "offset": 0}
         ... )
     """
     ok: bool
@@ -445,16 +446,17 @@ class ToolSchema(BaseModel):
     
     Example:
         >>> tool = ToolSchema(
-        ...     name="post_blog_article",
-        ...     title="Post Blog Article",
-        ...     description="Publish an article to the blog platform",
+        ...     name="get_user_blog_posts",
+        ...     title="Get User Blog Posts",
+        ...     description="Retrieve user's blog post history",
         ...     input_schema={
         ...         "type": "object",
         ...         "properties": {
-        ...             "title": {"type": "string"},
-        ...             "markdown": {"type": "string"}
+        ...             "user_id": {"type": "integer"},
+        ...             "limit": {"type": "integer"},
+        ...             "offset": {"type": "integer"}
         ...         },
-        ...         "required": ["title", "markdown"]
+        ...         "required": ["user_id"]
         ...     }
         ... )
     """
@@ -475,7 +477,7 @@ class CommandsListResponse(BaseModel):
     Example:
         >>> response = CommandsListResponse(
         ...     tools=[
-        ...         ToolSchema(name="post_blog_article", ...)
+        ...         ToolSchema(name="get_user_blog_posts", ...)
         ...     ]
         ... )
     """

@@ -10,7 +10,7 @@ from src.server.schemas import (
 from src.server.settings import settings
 from openai import AsyncOpenAI
 from src.mcp.tools import (
-    post_blog_article,
+    get_user_blog_posts,
     # 주석 처리: RAG 관련 툴은 다음 학기 구현 예정
     # search_vector_db,
     # search_graph_db
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # 사용 가능한 모든 툴의 중앙 레지스트리
 # agent.py와 commands.py에서 공유하여 사용
 TOOLS_REGISTRY = {
-    "post_blog_article": post_blog_article,           # 블로그 글 발행
+    "get_user_blog_posts": get_user_blog_posts,       # 사용자 블로그 포스트 조회
     # 주석 처리: RAG 관련 툴은 다음 학기 구현 예정
     # "search_vector_db": search_vector_db,             # Vector DB 의미론적 검색
     # "search_graph_db": search_graph_db,               # Graph DB 구조적 검색
@@ -54,10 +54,6 @@ async def _execute_regular_tool(tool_name: str, params: dict, user_api_key: str 
     
     tool_module = TOOLS_REGISTRY[tool_name]
     effective_params = dict(params or {})
-
-    # 주석 처리: 블로그 API 키는 post_blog_article.run() 내부에서 settings.BLOG_API_KEY 사용
-    # if user_api_key and tool_name == "post_blog_article":
-    #     effective_params.setdefault("api_key", user_api_key)
     
     if not hasattr(tool_module, "run"):
         raise ValueError(f"Tool '{tool_name}' has no run method")
@@ -101,21 +97,36 @@ async def call_llm_with_tools(
     system_prompt = """당신은 사용자의 요청을 분석하고 적절히 응답하는 AI 어시스턴트입니다.
 
 사용 가능한 툴:
-- post_blog_article: 블로그에 글 발행
+- get_user_blog_posts: 사용자의 블로그 포스트 기록 조회
 
 작업 지침:
 1. 사용자의 요청을 먼저 분석하세요.
-2. 블로그 게시가 필요한 경우에만 post_blog_article 툴을 사용하세요.
-   - 블로그 게시가 필요한 경우: "블로그에 올려줘", "글을 작성해줘", "발행해줘" 등 명시적 요청
-   - 블로그 게시가 불필요한 경우: 단순 질문, 정보 요청, 설명 요청 등
-3. 블로그 게시가 필요하지 않은 경우, 툴을 사용하지 않고 직접 답변하세요.
+2. 사용자의 블로그 글을 참고해야 한다고 판단되는 경우, 반드시 먼저 get_user_blog_posts 툴을 호출하세요.
+   
+   다음 상황에서는 반드시 get_user_blog_posts 툴을 먼저 호출해야 합니다:
+   - 블로그 글 작성, 포스트 작성, 글 발행 등의 요청이 있을 때
+   - 사용자의 기존 블로그 스타일, 톤, 주제를 맞춰야 할 때
+   - 사용자의 블로그 태그 패턴이나 글쓰기 방식을 참고해야 할 때
+   - 사용자의 블로그 기록을 바탕으로 더 나은 답변을 제공해야 할 때
+   - "블로그", "글", "포스트", "게시", "발행" 등의 키워드가 포함된 요청일 때
+   
+   get_user_blog_posts 툴 호출 후:
+   - 사용자의 글쓰기 스타일, 주제, 태그 사용 패턴 등을 분석하세요.
+   - 사용자의 기존 블로그 포스트의 톤, 구조, 형식을 파악하세요.
+   - 이를 바탕으로 사용자에게 맞는 블로그 글을 마크다운 형식으로 작성하세요.
+   - 블로그 글은 게시하지 않고, 마크다운 형식의 초안만 사용자에게 제공하세요.
+
+3. 블로그와 관련 없는 단순 질문이나 정보 요청의 경우, 툴을 사용하지 않고 직접 답변하세요.
 
 블로그 글 작성 시 고려사항:
-- 제목(title): 명확하고 매력적인 제목
-- 내용(markdown): 마크다운 형식으로 구조화된 글
-- 태그(tags): 선택적으로 관련 태그 추가
+- 제목(title): 명확하고 매력적인 제목 (사용자의 기존 제목 스타일 참고)
+- 내용(markdown): 마크다운 형식으로 구조화된 글 (사용자의 기존 글 구조 참고)
+- 태그(tags): 사용자의 기존 블로그 포스트에서 사용한 태그 패턴을 반드시 참고하여 제안
+- 톤과 스타일: 사용자의 기존 글쓰기 스타일과 톤을 정확히 유지하세요.
 
-입력된 내용만을 기반으로 답변을 생성하며, 외부 코드베이스 검색은 수행하지 않습니다."""
+중요: 사용자의 블로그 기록을 참고하면 더 나은 답변을 제공할 수 있다고 판단되면, 반드시 get_user_blog_posts 툴을 먼저 호출하세요. 툴 호출 없이 추측으로 답변하지 마세요.
+
+입력된 내용과 사용자의 블로그 기록을 기반으로 답변을 생성하며, 외부 코드베이스 검색은 수행하지 않습니다."""
     
     # 3. 사용자 메시지 구성
     context_str = json.dumps(context, ensure_ascii=False, indent=2) if context else "없음"
@@ -197,14 +208,9 @@ def _fallback_tool_selection(prompt: str, context: dict) -> tuple[str, list[dict
     prompt_lower = prompt.lower()
     
     # 키워드 기반 더미 로직
-    if "블로그" in prompt_lower or "blog" in prompt_lower or "글" in prompt_lower:
-        tool_calls.append({
-            "tool": "post_blog_article",
-            "params": {
-                "title": "자동 생성된 글",
-                "markdown": f"# 코드 변경 요약\n\n{prompt}"
-            }
-        })
+    # 블로그 관련 키워드가 있으면 get_user_blog_posts를 호출하도록 하지 않음
+    # (user_id가 필요하므로 fallback에서는 툴을 호출하지 않고 직접 응답)
+    # 블로그 글 작성 요청이 있으면 마크다운 형식으로 직접 응답 생성
     
     
     
@@ -262,13 +268,16 @@ async def execute_llm_command(
             params = tool_call_plan["params"]
             
             try:
+                # get_user_blog_posts 툴의 경우 user_id를 자동으로 주입
+                if tool_name == "get_user_blog_posts":
+                    params["user_id"] = request.user_id  # 요청 본문에서 사용자 ID 추출
+                
                 # 주석 처리: RAG 툴 관련 로직은 다음 학기 구현 예정
                 # RAG 툴의 경우 user_id를 자동으로 주입
                 # if tool_name in ["search_vector_db", "search_graph_db"]:
                 #     params["user_id"] = request.user_id  # 요청 본문에서 사용자 ID 추출
                 
                 # 모든 툴은 일반 실행
-                # 블로그 API 키는 settings.BLOG_API_KEY에서 자동으로 가져옴
                 result = await _execute_regular_tool(
                     tool_name,
                     params,

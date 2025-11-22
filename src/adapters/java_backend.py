@@ -214,12 +214,35 @@ async def get_user_by_id(
     )
 
 
-async def create_blog_post(api_key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Create a new blog post via the Java backend on behalf of the API key owner."""
+async def get_user_blog_posts(
+    user_id: int,
+    limit: int = 10,
+    offset: int = 0,
+    bearer_token: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Fetch user's blog posts from the Java backend.
+    
+    Args:
+        user_id: 사용자 ID
+        limit: 조회할 포스트 수 (기본값: 10)
+        offset: 페이지네이션 오프셋 (기본값: 0)
+        bearer_token: Java 서버로 전달할 JWT 토큰 (현재는 사용하지 않음, 내부 통신)
+    
+    Returns:
+        블로그 포스트 목록 및 메타데이터
+        {
+            "posts": [...],
+            "total": int,
+            "limit": int,
+            "offset": int
+        }
+    """
+    # Query parameters를 URL에 직접 추가
+    path = f"/api/v1/blog/posts?user_id={user_id}&limit={limit}&offset={offset}"
+    
     return await _request(
-        "POST",
-        "/api/v1/blog/posts",
-        json_body=payload,
-        extra_headers={"X-User-Api-Key": api_key},
+        "GET",
+        path,
+        bearer_token=None,  # JWT 없이 요청 (같은 EC2 내부 통신)
     )
 
