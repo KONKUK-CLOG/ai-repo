@@ -7,7 +7,7 @@ This document contains Mermaid diagrams visualizing the architecture and workflo
 The following class diagram illustrates the LLM agent flow from Java server request to blog publishing:
 
 ```mermaid
-%%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#fff', 'primaryTextColor':'#000', 'primaryBorderColor':'#000', 'lineColor':'#000', 'secondaryColor':'#f0f0f0', 'tertiaryColor':'#fff', 'mainBkg':'#fff', 'secondBkg':'#f0f0f0', 'mainContrastColor':'#000', 'darkMode':'false', 'background':'#fff', 'tertiaryBorderColor':'#000', 'tertiaryTextColor':'#000', 'fontSize':'16px', 'nodeBorder':'#000', 'clusterBkg':'#f0f0f0', 'clusterBorder':'#000', 'titleColor':'#000', 'edgeLabelBackground':'#fff', 'classText':'#000'}}}%%
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#fff', 'primaryTextColor':'#000', 'primaryBorderColor':'#000', 'lineColor':'#000', 'secondaryColor':'#f0f0f0', 'tertiaryColor':'#fff', 'mainBkg':'#e8f4f8', 'secondBkg':'#f0f0f0', 'mainContrastColor':'#000', 'darkMode':'false', 'background':'#ffffff', 'tertiaryBorderColor':'#000', 'tertiaryTextColor':'#000', 'fontSize':'16px', 'nodeBorder':'#2c3e50', 'clusterBkg':'#ecf0f1', 'clusterBorder':'#34495e', 'titleColor':'#000', 'edgeLabelBackground':'#fff', 'classText':'#000'}}}%%
 classDiagram
     %% External Systems
     class JavaServer {
@@ -109,6 +109,27 @@ classDiagram
 
     AgentRouter --> ToolCall : creates
     LLMExecuteResult --> ToolCall : contains
+
+    %% Styling with CSS classes
+    classDef javaServer fill:#e74c3c,stroke:#c0392b,stroke-width:3px,color:#fff
+    classDef agentRouter fill:#3498db,stroke:#2980b9,stroke-width:3px,color:#fff
+    classDef llmService fill:#9b59b6,stroke:#8e44ad,stroke-width:3px,color:#fff
+    classDef toolRegistry fill:#f39c12,stroke:#e67e22,stroke-width:3px,color:#fff
+    classDef blogTool fill:#1abc9c,stroke:#16a085,stroke-width:3px,color:#fff
+    classDef blogAdapter fill:#27ae60,stroke:#229954,stroke-width:3px,color:#fff
+    classDef javaAdapter fill:#e67e22,stroke:#d35400,stroke-width:3px,color:#fff
+    classDef dataModel fill:#95a5a6,stroke:#7f8c8d,stroke-width:3px,color:#fff
+    classDef settings fill:#34495e,stroke:#2c3e50,stroke-width:3px,color:#fff
+
+    class JavaServer javaServer
+    class AgentRouter agentRouter
+    class LLMService llmService
+    class TOOLS_REGISTRY toolRegistry
+    class PostBlogArticleTool blogTool
+    class BlogAPIAdapter blogAdapter
+    class JavaBackendAdapter javaAdapter
+    class LLMExecuteRequest,LLMExecuteResult,ToolCall dataModel
+    class Settings settings
 ```
 
 ## LLM Agent Flow - Sequence Diagram
@@ -197,305 +218,278 @@ sequenceDiagram
 4. **If tool selected**: Tool executes → BlogAPIAdapter → JavaBackendAdapter → Java Server
 5. **Final response**: LLM generates user-friendly response and returns to Java Server
 
-## Sequence Diagram
+---
 
-The following sequence diagram illustrates the main workflows in the system:
+## Next Semester: Diff Application & WAL Processing - Sequence Diagram
+
+**⚠️ 다음 학기 구현 예정**: 현재 주석 처리된 코드를 기반으로 한 예상 흐름입니다.
 
 ```mermaid
 %%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#fff', 'primaryTextColor':'#000', 'primaryBorderColor':'#000', 'lineColor':'#000', 'secondaryColor':'#f0f0f0', 'tertiaryColor':'#fff', 'noteTextColor':'#000', 'noteBkgColor':'#fff', 'noteBorderColor':'#000', 'actorTextColor':'#000', 'actorLineColor':'#000', 'signalColor':'#000', 'signalTextColor':'#000', 'labelBoxBkgColor':'#fff', 'labelBoxBorderColor':'#000', 'labelTextColor':'#000', 'loopTextColor':'#000', 'activationBorderColor':'#000', 'activationBkgColor':'#f0f0f0', 'sequenceNumberColor':'#000'}}}%%
 sequenceDiagram
-    participant User
-    participant Browser
-    participant FastAPI as FastAPI Server
-    participant GitHub
-    participant UserRepo as User Repository
-    participant Client as VSCode Extension
-    participant WAL as Write-Ahead Log
-    participant VectorDB as Vector DB (Qdrant)
-    participant GraphDB as Graph DB (Neo4j)
-    participant Claude as Claude Desktop
-    participant MCP as MCP Server
-    participant Scheduler as Background Scheduler
+    participant JavaServer as Java Server
+    participant DiffsRouter as DiffsRouter<br/>(Python)
+    participant WAL as WriteAheadLog
+    participant VectorDB as VectorDBAdapter
+    participant GraphDB as GraphDBAdapter
+    participant OpenAI as OpenAI<br/>(Embeddings)
+    participant Qdrant as Qdrant<br/>(Vector DB)
+    participant Neo4j as Neo4j<br/>(Graph DB)
+    participant Scheduler as BackgroundScheduler
 
-    %% GitHub OAuth Authentication Flow
-    rect rgb(200, 220, 250)
-        Note over User,UserRepo: GitHub OAuth Authentication
-        User->>Browser: Click login
-        Browser->>FastAPI: GET /auth/github/login
-        FastAPI->>GitHub: Redirect to OAuth
-        GitHub->>User: Request authorization
-        User->>GitHub: Approve
-        GitHub->>FastAPI: GET /auth/github/callback?code=...
-        FastAPI->>GitHub: Exchange code for access token
-        GitHub-->>FastAPI: Access token + user info
-        FastAPI->>UserRepo: Create/update user
-        UserRepo-->>FastAPI: User with API key
-        FastAPI-->>Browser: Return API key + user info
-    end
-
-    %% Diff Application with WAL Flow
+    %% Diff Application Flow
     rect rgb(220, 250, 220)
-        Note over Client,GraphDB: Diff Application with WAL
-        Client->>FastAPI: POST /api/v1/diffs/apply<br/>(x-api-key, files diff)
-        FastAPI->>UserRepo: Validate API key
-        UserRepo-->>FastAPI: User validated
-        FastAPI->>WAL: Log operation (pending)
-        WAL-->>FastAPI: Entry created
-        FastAPI->>VectorDB: Generate embeddings & upsert
-        VectorDB-->>FastAPI: Success
-        FastAPI->>GraphDB: Parse AST & create nodes/relationships
-        GraphDB-->>FastAPI: Success
-        FastAPI->>WAL: Update status (success)
-        FastAPI-->>Client: Return statistics
-    end
-
-    %% MCP Tool Execution Flow
-    rect rgb(250, 230, 200)
-        Note over Claude,MCP: MCP Tool Execution
-        Claude->>MCP: JSON-RPC: initialize
-        MCP-->>Claude: Server capabilities
-        Claude->>MCP: JSON-RPC: tools/list
-        MCP-->>Claude: Available tools list
-        Claude->>MCP: JSON-RPC: tools/call<br/>(name, arguments)
-        MCP->>MCP: Execute tool function
-        MCP-->>Claude: Tool result
+        Note over JavaServer,Neo4j: Diff Application with WAL (다음 학기 구현 예정)
+        JavaServer->>DiffsRouter: POST /internal/v1/diffs/apply<br/>{user_id, files: [{path, status, before, after}]}
+        
+        DiffsRouter->>DiffsRouter: Validate input<br/>(unified or files)
+        
+        loop For each file change
+            DiffsRouter->>WAL: append({type: "upsert", file, content, hash, user_id})
+            WAL->>WAL: Save content to<br/>data/wal_content/{id}.txt
+            WAL->>WAL: Log metadata to<br/>data/wal.jsonl<br/>(status: "pending")
+            WAL-->>DiffsRouter: wal_id
+        end
+        
+        DiffsRouter->>VectorDB: upsert_embeddings(documents, user_id)
+        loop For each document
+            VectorDB->>OpenAI: Generate embedding<br/>(text-embedding-3-small)
+            OpenAI-->>VectorDB: embedding vector
+            VectorDB->>Qdrant: upsert({id, vector, payload})
+            Qdrant-->>VectorDB: Success
+        end
+        VectorDB-->>DiffsRouter: embeddings_upserted count
+        
+        DiffsRouter->>GraphDB: update_code_graph(files, contents, user_id)
+        loop For each file
+            GraphDB->>GraphDB: Parse AST<br/>(Python: ast module)
+            GraphDB->>GraphDB: Extract entities<br/>(functions, classes, imports)
+            GraphDB->>Neo4j: Create/update nodes<br/>(File, Function, Class)
+            GraphDB->>Neo4j: Create relationships<br/>(CALLS, IMPORTS, CONTAINS)
+            Neo4j-->>GraphDB: Success
+        end
+        GraphDB-->>DiffsRouter: graph_nodes_updated count
+        
+        loop For each successful file
+            DiffsRouter->>WAL: mark_success(wal_id)
+            WAL->>WAL: Update status to "success"<br/>in data/wal.jsonl
+        end
+        
+        DiffsRouter-->>JavaServer: DiffApplyResult<br/>{files_processed, embeddings_upserted, graph_nodes_updated}
     end
 
     %% Background Recovery Flow
     rect rgb(250, 220, 220)
-        Note over Scheduler,WAL: Background Recovery (Every 5 min)
-        Scheduler->>WAL: Check for failed operations
-        WAL-->>Scheduler: List of failed entries
-        loop For each failed entry
-            Scheduler->>WAL: Read content from file
-            Scheduler->>VectorDB: Retry upsert
-            Scheduler->>GraphDB: Retry update
-            Scheduler->>WAL: Update status
+        Note over Scheduler,Neo4j: WAL Recovery (5분마다 실행, 다음 학기 구현 예정)
+        Scheduler->>WAL: get_failed_operations()
+        WAL-->>Scheduler: List of failed entries<br/>(status: "failed")
+        
+        loop For each failed operation
+            Scheduler->>WAL: get_content(entry_id)
+            WAL->>WAL: Read from<br/>data/wal_content/{id}.txt
+            WAL-->>Scheduler: File content
+            
+            alt Operation type: upsert
+                Scheduler->>VectorDB: upsert_embeddings([{file, content}])
+                VectorDB->>OpenAI: Generate embedding
+                OpenAI-->>VectorDB: embedding vector
+                VectorDB->>Qdrant: upsert
+                Qdrant-->>VectorDB: Success
+                VectorDB-->>Scheduler: Success
+                
+                Scheduler->>GraphDB: update_code_graph([file], {file: content})
+                GraphDB->>GraphDB: Parse AST
+                GraphDB->>Neo4j: Create/update nodes & relationships
+                Neo4j-->>GraphDB: Success
+                GraphDB-->>Scheduler: Success
+                
+                Scheduler->>WAL: mark_success(entry_id)
+            else Operation type: delete
+                Scheduler->>VectorDB: delete_embeddings([file_path])
+                VectorDB->>Qdrant: delete points
+                Qdrant-->>VectorDB: Success
+                
+                Scheduler->>GraphDB: delete_file_nodes([file_path])
+                GraphDB->>Neo4j: Delete nodes & relationships
+                Neo4j-->>GraphDB: Success
+                
+                Scheduler->>WAL: mark_success(entry_id)
+            end
         end
+    end
+
+    %% WAL Cleanup Flow
+    rect rgb(250, 230, 200)
+        Note over Scheduler,WAL: WAL Cleanup (1일마다 실행, 다음 학기 구현 예정)
+        Scheduler->>WAL: cleanup_old_entries(days=7)
+        WAL->>WAL: Find entries with<br/>status="success" and<br/>completed_at > 7 days
+        loop For each old entry
+            WAL->>WAL: Delete from<br/>data/wal.jsonl
+            WAL->>WAL: Delete file<br/>data/wal_content/{id}.txt
+        end
+        WAL-->>Scheduler: Cleanup completed
     end
 ```
 
-### Workflow Descriptions
+### Diff Application & WAL Processing - Component Descriptions
 
-1. **GitHub OAuth Authentication**: Users authenticate via GitHub OAuth to receive a unique API key. The system creates or updates user records and ensures data isolation per user.
+#### DiffsRouter
+- **apply_diff**: Receives diff requests from Java server and processes file changes
+- **Input validation**: Validates unified diff or files array format
+- **WAL logging**: Logs all operations to WAL before execution
+- **Error handling**: Marks operations as success/failure in WAL
 
-2. **Diff Application with WAL**: VSCode extension sends code changes to the server. All updates are logged to WAL first (Write-Ahead Log), then processed by Vector DB for semantic search and Graph DB for code relationships. Failed operations are automatically retried.
+#### WriteAheadLog (WAL)
+- **append**: Logs operation metadata to `data/wal.jsonl` and saves content to `data/wal_content/{id}.txt`
+- **mark_success/mark_failure**: Updates operation status in WAL
+- **get_failed_operations**: Retrieves failed operations for recovery
+- **get_content**: Restores file content from WAL content files
+- **cleanup_old_entries**: Removes old successful entries (7+ days)
 
-3. **MCP Tool Execution**: Claude Desktop communicates with the MCP Server via JSON-RPC over stdio. Tools include blog posting plus Vector/Graph database searches.
+#### VectorDBAdapter
+- **upsert_embeddings**: Generates embeddings using OpenAI and upserts to Qdrant
+- **delete_embeddings**: Deletes embeddings from Qdrant
+- **semantic_search**: Performs semantic search (used by RAG tools)
 
-4. **Background Recovery**: A scheduler runs every 5 minutes to retry failed WAL operations, ensuring data consistency and reliability.
+#### GraphDBAdapter
+- **update_code_graph**: Parses code AST and creates/updates nodes and relationships in Neo4j
+- **delete_file_nodes**: Deletes file-related nodes from Neo4j
+- **search_related_code**: Searches code entities and relationships (used by RAG tools)
 
-## Class Diagram
+#### BackgroundScheduler
+- **wal_recovery_task**: Runs every 5 minutes to retry failed WAL operations
+- **wal_cleanup_task**: Runs daily to clean up old WAL entries
 
-The following class diagram shows the main components and their relationships:
+---
+
+## Next Semester: RAG (Retrieval-Augmented Generation) - Sequence Diagram
+
+**⚠️ 다음 학기 구현 예정**: 현재 주석 처리된 RAG 툴을 기반으로 한 예상 흐름입니다.
 
 ```mermaid
-%%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#fff', 'primaryTextColor':'#000', 'primaryBorderColor':'#000', 'lineColor':'#000', 'secondaryColor':'#f0f0f0', 'tertiaryColor':'#fff', 'mainBkg':'#fff', 'secondBkg':'#f0f0f0', 'mainContrastColor':'#000', 'darkMode':'false', 'background':'#fff', 'tertiaryBorderColor':'#000', 'tertiaryTextColor':'#000', 'fontSize':'16px', 'nodeBorder':'#000', 'clusterBkg':'#f0f0f0', 'clusterBorder':'#000', 'titleColor':'#000', 'edgeLabelBackground':'#fff', 'classText':'#000'}}}%%
-classDiagram
-    %% FastAPI Server Components
-    class FastAPIApp {
-        +CORSMiddleware
-        +lifespan()
-        +include_router()
-    }
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#fff', 'primaryTextColor':'#000', 'primaryBorderColor':'#000', 'lineColor':'#000', 'secondaryColor':'#f0f0f0', 'tertiaryColor':'#fff', 'noteTextColor':'#000', 'noteBkgColor':'#fff', 'noteBorderColor':'#000', 'actorTextColor':'#000', 'actorLineColor':'#000', 'signalColor':'#000', 'signalTextColor':'#000', 'labelBoxBkgColor':'#fff', 'labelBoxBorderColor':'#000', 'labelTextColor':'#000', 'loopTextColor':'#000', 'activationBorderColor':'#000', 'activationBkgColor':'#f0f0f0', 'sequenceNumberColor':'#000'}}}%%
+sequenceDiagram
+    participant JavaServer as Java Server
+    participant AgentRouter as AgentRouter<br/>(Python)
+    participant LLMService as LLM Service<br/>(OpenAI)
+    participant ToolRegistry as TOOLS_REGISTRY
+    participant VectorTool as SearchVectorDBTool
+    participant GraphTool as SearchGraphDBTool
+    participant VectorDB as VectorDBAdapter
+    participant GraphDB as GraphDBAdapter
+    participant OpenAI as OpenAI<br/>(Embeddings)
+    participant Qdrant as Qdrant<br/>(Vector DB)
+    participant Neo4j as Neo4j<br/>(Graph DB)
 
-    class AuthRouter {
-        +github_login()
-        +github_callback()
-        +github_logout()
-    }
-
-    class DiffsRouter {
-        +apply_diffs()
-        +validate_api_key()
-    }
-
-    class AgentRouter {
-        +execute_llm_command()
-        +natural_language_processing()
-    }
-
-    class CommandsRouter {
-        +list_commands()
-        +execute_command()
-    }
-
-    class HealthRouter {
-        +healthz()
-        +readyz()
-    }
-
-    %% MCP Server Components
-    class MCPServer {
-        -bool initialized
-        +handle_request()
-        +initialize()
-        +list_tools()
-        +call_tool()
-        +run()
-    }
-
-    class ToolRegistry {
-        +TOOLS[]
-        +TOOL_EXECUTORS{}
-    }
-
-    class PostBlogTool {
-        +TOOL
-        +run(arguments)
-    }
-
-    class SearchVectorTool {
-        +TOOL
-        +run(arguments)
-    }
-
-    class SearchGraphTool {
-        +TOOL
-        +run(arguments)
-    }
-
-    %% Adapter Components
-    class VectorDBAdapter {
-        +get_qdrant_client()
-        +generate_embedding()
-        +upsert_file()
-        +delete_file()
-        +search()
-    }
-
-    class GraphDBAdapter {
-        +get_neo4j_driver()
-        +parse_python_file()
-        +upsert_file()
-        +delete_file()
-        +search()
-    }
-
-    class BlogAPIAdapter {
-        +post_article()
-        +update_article()
-    }
-
-    class GitHubAdapter {
-        +oauth_exchange()
-        +get_user_info()
-        +create_commit()
-    }
-
-    %% Background Components
-    class BackgroundScheduler {
+    %% RAG Flow with Vector DB
+    rect rgb(200, 250, 250)
+        Note over JavaServer,Neo4j: RAG: Vector DB Semantic Search (다음 학기 구현 예정)
+        JavaServer->>AgentRouter: POST /internal/v1/llm/execute<br/>{user_id, prompt: "사용자 인증 로직 찾아줘"}
+        AgentRouter->>ToolRegistry: Get available tools
+        ToolRegistry-->>AgentRouter: [post_blog_article,<br/>search_vector_db,<br/>search_graph_db]
         
-        +start_scheduler()
-        +shutdown_scheduler()
-        +run_task_now()
-    }
+        AgentRouter->>LLMService: call_llm_with_tools(prompt, context, tools)
+        Note over LLMService: System Prompt:<br/>"RAG 도구로 관련 코드 검색 후<br/>블로그 글 작성"
+        LLMService->>LLMService: Analyze request<br/>(코드 검색 필요)
+        LLMService-->>AgentRouter: tool_calls: [search_vector_db]
+        
+        AgentRouter->>VectorTool: run({query: "사용자 인증", top_k: 10, user_id})
+        VectorTool->>VectorDB: semantic_search(query, user_id, top_k)
+        VectorDB->>OpenAI: Generate query embedding<br/>(text-embedding-3-small)
+        OpenAI-->>VectorDB: query_embedding vector
+        VectorDB->>Qdrant: search(collection, query_vector, top_k, filter: user_id)
+        Qdrant-->>VectorDB: Results with scores<br/>[{file, content_preview, score}]
+        VectorDB-->>VectorTool: Search results
+        VectorTool-->>AgentRouter: {success: true, results: [...]}
+        
+        AgentRouter->>LLMService: _generate_final_response(prompt, tool_calls)
+        Note over LLMService: LLM uses search results<br/>as context for response
+        LLMService-->>AgentRouter: Final response with<br/>code references
+        AgentRouter-->>JavaServer: LLMExecuteResult<br/>{tool_calls, final_response}
+    end
 
-    class WAL {
-        +log_operation()
-        +update_status()
-        +get_failed_entries()
-        +cleanup_old_entries()
-        +get_statistics()
-    }
+    %% RAG Flow with Graph DB
+    rect rgb(250, 200, 250)
+        Note over JavaServer,Neo4j: RAG: Graph DB Structure Search (다음 학기 구현 예정)
+        JavaServer->>AgentRouter: POST /internal/v1/llm/execute<br/>{user_id, prompt: "authenticate 함수가<br/>어떤 함수를 호출하는지 알려줘"}
+        AgentRouter->>LLMService: call_llm_with_tools(prompt, context, tools)
+        LLMService->>LLMService: Analyze request<br/>(함수 호출 관계 검색 필요)
+        LLMService-->>AgentRouter: tool_calls: [search_graph_db]
+        
+        AgentRouter->>GraphTool: run({query: "authenticate", limit: 10, user_id})
+        GraphTool->>GraphDB: search_related_code(query, user_id, limit)
+        GraphDB->>Neo4j: MATCH (f:Function)<br/>WHERE f.name CONTAINS "authenticate"<br/>AND f.user_id = {user_id}<br/>OPTIONAL MATCH (f)-[r:CALLS]->(called)<br/>RETURN f, r, called
+        Neo4j-->>GraphDB: Entities with relationships<br/>[{entity_name, entity_type, calls: [...]}]
+        GraphDB-->>GraphTool: Search results
+        GraphTool-->>AgentRouter: {success: true, results: [...]}
+        
+        AgentRouter->>LLMService: _generate_final_response(prompt, tool_calls)
+        LLMService-->>AgentRouter: Final response with<br/>function call relationships
+        AgentRouter-->>JavaServer: LLMExecuteResult
+    end
 
-    class Tasks {
-        +wal_recovery_task()
-        +wal_cleanup_task()
-    }
-
-    %% Data Layer
-    class User {
-        +int id
-        +int github_id
-        +str username
-        +str email
-        +str api_key
-        +datetime created_at
-    }
-
-    class UserRepository {
-        +create_user()
-        +get_user_by_api_key()
-        +get_user_by_github_id()
-        +update_user()
-    }
-
-    %% Relationships
-    FastAPIApp --> AuthRouter
-    FastAPIApp --> DiffsRouter
-    FastAPIApp --> AgentRouter
-    FastAPIApp --> CommandsRouter
-    FastAPIApp --> HealthRouter
-    FastAPIApp --> BackgroundScheduler
-
-    AuthRouter --> GitHubAdapter
-    AuthRouter --> UserRepository
-
-    DiffsRouter --> UserRepository
-    DiffsRouter --> WAL
-    DiffsRouter --> VectorDBAdapter
-    DiffsRouter --> GraphDBAdapter
-
-    AgentRouter --> UserRepository
-    AgentRouter --> ToolRegistry
-
-    CommandsRouter --> UserRepository
-    CommandsRouter --> ToolRegistry
-
-    MCPServer --> ToolRegistry
-    ToolRegistry --> PostBlogTool
-    ToolRegistry --> SearchVectorTool
-    ToolRegistry --> SearchGraphTool
-
-    PostBlogTool --> BlogAPIAdapter
-    SearchVectorTool --> VectorDBAdapter
-    SearchGraphTool --> GraphDBAdapter
-
-    BackgroundScheduler --> Tasks
-    Tasks --> WAL
-    Tasks --> VectorDBAdapter
-    Tasks --> GraphDBAdapter
-
-    UserRepository --> User
-
-    VectorDBAdapter ..> User : filters by user_id
-    GraphDBAdapter ..> User : filters by user_id
-    WAL ..> User : tracks user_id
+    %% Combined RAG Flow
+    rect rgb(250, 250, 200)
+        Note over JavaServer,Neo4j: RAG: Combined Vector + Graph Search (다음 학기 구현 예정)
+        JavaServer->>AgentRouter: POST /internal/v1/llm/execute<br/>{user_id, prompt: "사용자 인증 관련 코드를<br/>찾아서 블로그 글 작성해줘"}
+        AgentRouter->>LLMService: call_llm_with_tools(prompt, context, tools)
+        LLMService->>LLMService: Analyze request<br/>(코드 검색 + 블로그 작성)
+        LLMService-->>AgentRouter: tool_calls: [search_vector_db,<br/>search_graph_db,<br/>post_blog_article]
+        
+        par Vector DB Search
+            AgentRouter->>VectorTool: run({query: "사용자 인증", user_id})
+            VectorTool->>VectorDB: semantic_search(...)
+            VectorDB->>Qdrant: search(...)
+            Qdrant-->>VectorDB: Results
+            VectorDB-->>VectorTool: Results
+            VectorTool-->>AgentRouter: Vector search results
+        and Graph DB Search
+            AgentRouter->>GraphTool: run({query: "authenticate", user_id})
+            GraphTool->>GraphDB: search_related_code(...)
+            GraphDB->>Neo4j: MATCH ... RETURN ...
+            Neo4j-->>GraphDB: Results
+            GraphDB-->>GraphTool: Results
+            GraphTool-->>AgentRouter: Graph search results
+        end
+        
+        AgentRouter->>LLMService: _generate_final_response(prompt, tool_calls)
+        Note over LLMService: LLM combines Vector + Graph<br/>results as context
+        LLMService-->>AgentRouter: Response with code context
+        
+        AgentRouter->>AgentRouter: Execute post_blog_article<br/>with code context
+        AgentRouter-->>JavaServer: LLMExecuteResult<br/>{tool_calls, final_response}
+    end
 ```
 
-### Component Descriptions
+### RAG - Component Descriptions
 
-#### FastAPI Server
-- **FastAPIApp**: Main application with CORS middleware and router management
-- **Routers**: Handle different API endpoints (auth, diffs, agent, commands, health)
-- All routers use user authentication and data isolation by `user_id`
+#### SearchVectorDBTool
+- **TOOL**: Tool metadata for semantic search
+- **run**: Executes semantic search using embeddings
+- **Parameters**: `query` (search text), `top_k` (number of results), `user_id` (auto-injected)
 
-#### MCP Server
-- **MCPServer**: Stdio-based JSON-RPC 2.0 server for LLM integration
-- **ToolRegistry**: Central registry of available tools and their executors
-- **Tools**: Individual tool implementations for blog posting plus Vector/Graph DB searches
+#### SearchGraphDBTool
+- **TOOL**: Tool metadata for graph-based code structure search
+- **run**: Executes graph search for code entities and relationships
+- **Parameters**: `query` (entity name), `limit` (max results), `user_id` (auto-injected)
 
-#### Adapters
-- **VectorDBAdapter**: Qdrant client for semantic search with OpenAI embeddings
-- **GraphDBAdapter**: Neo4j client for code relationship tracking with AST parsing
-- **BlogAPIAdapter**: Blog posting functionality
-- **GitHubAdapter**: GitHub OAuth integration
+#### VectorDBAdapter (RAG usage)
+- **semantic_search**: Generates query embedding and searches Qdrant for similar code
+- **Returns**: File paths, content previews, similarity scores
+- **User isolation**: Filters results by `user_id`
 
-#### Background Processing
-- **BackgroundScheduler**: APScheduler for periodic tasks
-- **WAL**: Write-Ahead Log for operation durability and recovery
-- **Tasks**: Scheduled tasks for WAL recovery (5 min) and cleanup (1 day)
+#### GraphDBAdapter (RAG usage)
+- **search_related_code**: Searches Neo4j for code entities matching query
+- **Returns**: Entity information (functions, classes) with call relationships
+- **User isolation**: Filters results by `user_id`
 
-#### Data Layer
-- **User**: User model with GitHub OAuth info and API key
-- **UserRepository**: SQLite-based user data access layer
-- All data operations are filtered by `user_id` for multi-user isolation
+### RAG Decision Flow
 
-## Architecture Principles
-
-1. **Multi-User Support**: Complete data isolation using `user_id` filtering in all databases
-2. **Durability**: WAL ensures all operations are logged before execution
-3. **Fault Tolerance**: Background scheduler automatically retries failed operations
-4. **Clean Architecture**: Adapter pattern separates external service integrations
-5. **Dual Interface**: REST API for clients + MCP for LLM integration
+1. **LLM analyzes request**: Determines if code search is needed
+2. **Tool selection**:
+   - **search_vector_db**: When semantic similarity search is needed (e.g., "사용자 인증 로직 찾아줘")
+   - **search_graph_db**: When code structure/relationships are needed (e.g., "authenticate 함수가 호출하는 함수들")
+   - **Both tools**: When comprehensive code context is needed
+3. **Search execution**: Tools query Vector DB and/or Graph DB
+4. **Context injection**: Search results are passed to LLM as context
+5. **Response generation**: LLM generates response using code context
