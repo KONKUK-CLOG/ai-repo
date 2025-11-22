@@ -318,19 +318,14 @@ def mock_neo4j_driver():
 
 @pytest.fixture
 def mock_tools():
-    """Mock all MCP tool run() methods.
+    """Mock the remaining MCP tool run() methods.
     
     Yields:
         Dict of mocked tool run functions
-        
-    설명:
-        - 모든 tool의 run() 메서드를 AsyncMock으로 대체
-        - TypeError: object MagicMock can't be used in 'await' expression 방지
-        - 각 tool이 성공 응답을 반환하도록 설정
     """
     with patch('src.mcp.tools.post_blog_article.run', new_callable=AsyncMock) as mock_blog:
-        with patch('src.mcp.tools.publish_to_notion.run', new_callable=AsyncMock) as mock_notion:
-            with patch('src.mcp.tools.create_commit_and_push.run', new_callable=AsyncMock) as mock_git:
+        with patch('src.mcp.tools.search_vector_db.run', new_callable=AsyncMock) as mock_vector:
+            with patch('src.mcp.tools.search_graph_db.run', new_callable=AsyncMock) as mock_graph:
                 mock_blog.return_value = {
                     "success": True,
                     "article": {
@@ -339,24 +334,28 @@ def mock_tools():
                         "published": True
                     }
                 }
-                mock_notion.return_value = {
+                mock_vector.return_value = {
                     "success": True,
-                    "page": {
-                        "page_id": "notion-456",
-                        "url": "https://notion.so/page-456"
-                    }
+                    "results": [
+                        {"file": "src/test.py", "content_preview": "def foo(): pass", "score": 0.9}
+                    ],
+                    "total_results": 1,
+                    "query": "테스트",
+                    "top_k": 10
                 }
-                mock_git.return_value = {
+                mock_graph.return_value = {
                     "success": True,
-                    "commit": {
-                        "sha": "abc123def456",
-                        "message": "Test commit"
-                    }
+                    "results": [
+                        {"file": "src/test.py", "entity_name": "Foo", "entity_type": "function"}
+                    ],
+                    "total_results": 1,
+                    "query": "테스트",
+                    "limit": 10
                 }
                 yield {
                     'blog': mock_blog,
-                    'notion': mock_notion,
-                    'git': mock_git
+                    'vector': mock_vector,
+                    'graph': mock_graph
                 }
 
 
@@ -372,37 +371,6 @@ def mock_blog_api():
             "article_id": "test-123",
             "url": "https://blog.example.com/test-123",
             "published": True
-        }
-        yield mock
-
-
-@pytest.fixture
-def mock_notion_api():
-    """Mock Notion API adapter.
-    
-    Yields:
-        AsyncMock for notion.publish_page
-    """
-    with patch('src.adapters.notion.publish_page', new_callable=AsyncMock) as mock:
-        mock.return_value = {
-            "page_id": "notion-456",
-            "url": "https://notion.so/page-456"
-        }
-        yield mock
-
-
-@pytest.fixture
-def mock_github_adapter():
-    """Mock GitHub adapter.
-    
-    Yields:
-        AsyncMock for github.create_commit_and_push
-    """
-    with patch('src.adapters.github.create_commit_and_push', new_callable=AsyncMock) as mock:
-        mock.return_value = {
-            "sha": "abc123def456",
-            "message": "Test commit",
-            "pushed": True
         }
         yield mock
 

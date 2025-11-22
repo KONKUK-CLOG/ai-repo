@@ -24,7 +24,14 @@ class Settings(BaseSettings):
     
     # Service-to-service authentication
     JAVA_BACKEND_SERVICE_JWT: Optional[str] = None
+    JAVA_BACKEND_SERVICE_CLIENT_ID: Optional[str] = None
+    JAVA_BACKEND_SERVICE_CLIENT_SECRET: Optional[str] = None
     JAVA_BACKEND_SERVICE_JWT_REFRESH_PATH: Optional[str] = "/api/v1/auth/service-jwt"
+    JAVA_BACKEND_SERVICE_JWT_SCOPE: Optional[str] = None
+    JAVA_BACKEND_SERVICE_TOKEN_SKEW_SECONDS: int = 60
+    JAVA_BACKEND_SERVICE_REFRESH_MIN_INTERVAL: int = 300
+    JAVA_BACKEND_SERVICE_REFRESH_BACKOFF_SECONDS: int = 5
+    JAVA_BACKEND_SERVICE_REFRESH_BACKOFF_MAX_SECONDS: int = 300
     JAVA_BACKEND_SERVICE_JWT_ALGORITHMS: Optional[str] = None
     JAVA_BACKEND_SERVICE_JWT_AUDIENCE: Optional[str] = None
     JAVA_BACKEND_SERVICE_JWT_ISSUER: Optional[str] = None

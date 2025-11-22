@@ -325,45 +325,6 @@ def test_rag_concise_graph_format(mock_user_repo):
     assert len(formatted.split('\n')) == 1  # Single line
 
 
-def test_rag_only_for_blog_article(client, mock_user_repo, mock_openai_chat, mock_tools):
-    """RAG가 블로그 글 작성에만 사용되는지 테스트.
-    
-    Given: 다양한 툴이 있고
-    When: 블로그가 아닌 다른 툴(Notion 등)을 사용하면
-    Then: RAG 검색이 수행되지 않아야 함
-    
-    검증사항:
-    - 블로그 툴에만 RAG 적용
-    - 다른 툴에는 RAG 미적용
-    - 불필요한 검색 방지
-    - 성능 최적화
-    """
-    # Given: 블로그가 아닌 다른 툴 요청
-    # Test with non-blog tool (publish_to_notion)
-    request_data = {
-        "prompt": "Notion에 페이지 발행해줘",
-        "context": {
-            "title": "Test Page",
-            "content": "Test content"
-        }
-    }
-    
-    # When: 요청 수행
-    with patch('src.adapters.vector_db.semantic_search') as mock_vector:
-        with patch('src.adapters.graph_db.search_related_code') as mock_graph:
-                response = client.post(
-                    "/api/v1/llm/execute",
-                    json=request_data,
-                    headers={"x-api-key": TEST_API_KEY},
-                )
-            
-            # Then: RAG가 호출되지 않음
-            assert response.status_code == 200
-            
-            # RAG should NOT be called for non-blog tools
-            # (This test verifies the routing logic)
-
-
 def test_rag_user_isolation(mock_user_repo, mock_qdrant_client, mock_neo4j_driver):
     """RAG가 사용자별 데이터 격리를 준수하는지 테스트.
     

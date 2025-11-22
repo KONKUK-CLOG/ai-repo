@@ -6,11 +6,11 @@ FastAPI + MCP 서버 프로젝트. TypeScript 클라이언트가 보낸 코드 �
 
 - **🔐 다중 사용자 지원**: GitHub OAuth 2.0 (Java Auth 서버) + JWT 기반 인증
 - **🔑 사용자별 JWT**: TS 클라이언트가 Java Auth 서버에서 받은 JWT를 Python 서버로 전달
-- **🛡️ 서비스 간 JWT**: Java ↔ Python 서버 간 Bearer 토큰으로 내부 API 보호
+- **🛡️ 서비스 간 JWT**: ServiceTokenManager가 Java ↔ Python 서버 간 토큰을 자동 발급/갱신
 - **REST API Only**: SSE/WebSocket 없이 순수 REST로 구현
 - **Idempotency 지원**: `x-idempotency-key` 헤더로 중복 방지
 - **MCP 툴 노출**: LLM이 안전하게 호출할 수 있는 MCP 프로토콜 지원
-- **어댑터 패턴**: 외부 서비스(블로그, Vector DB, Graph DB, Notion, GitHub)를 어댑터로 분리
+- **어댑터 패턴**: 외부 서비스(블로그, Vector DB, Graph DB, GitHub OAuth)를 어댑터로 분리
 - **WAL (Write-Ahead Log)**: 모든 업데이트를 로그에 먼저 기록, 실패 시 자동 복구 (content 별도 파일 저장)
 - **백그라운드 스케줄러**: 5분마다 WAL 복구, 1일마다 WAL 정리 (클라이언트 주도 동기화)
 - **Vector DB 통합**: Qdrant를 사용한 시맨틱 검색 (OpenAI 임베딩)
@@ -53,12 +53,19 @@ Vector/Graph DB (filtered by user_id)
 | 방향 | 인증 방식 |
 | --- | --- |
 | TS → Python | 사용자 JWT (`Authorization: Bearer <user_jwt>`) |
-| Python → Java (시스템 작업) | 서비스 JWT (`ensure_service_jwt()`로 확보) |
+| Python → Java (시스템 작업) | 서비스 JWT (ServiceTokenManager 자동 발급/갱신) |
 | Java → Python (내부 API) | 서비스 JWT (`get_java_service_identity` → `verify_service_jwt`) |
 
 - 서비스 JWT는 Java Auth 서버가 발급합니다.
 - Python 서버는 `JAVA_BACKEND_SERVICE_JWT_*` 환경 변수로 검증 파라미터를 설정합니다.
 - 내부 라우트(예: `/api/v1/admin/*`)는 `get_java_service_identity` 의존성으로 보호됩니다.
+
+#### ServiceTokenManager
+
+- FastAPI 시작 시 `ServiceTokenManager`가 Java Auth 서버에 `client_id/secret`로 토큰을 요청하고 만료 전에 자동 갱신합니다.
+- `JAVA_BACKEND_SERVICE_JWT`가 주어지면 초기 토큰으로 사용하며, 자격 증명이 있을 경우 주기적으로 교체합니다.
+- 모든 Python → Java 호출(`src/adapters/java_backend.py`)은 매니저를 통해 `Authorization: Bearer <service token>`을 부착하고, 401 응답 시 즉시 토큰을 새로 받아 한 번 재시도합니다.
+- VS Code 확장은 기존처럼 Java Auth 서버에서 사용자 JWT를 발급받아 Python 서버 호출 시 헤더로 전달하면 됩니다.
 
 ## 프로젝트 구조
 
@@ -84,7 +91,6 @@ ts-llm-mcp-bridge/
 │  │  ├─ blog_api.py     # 블로그 API
 │  │  ├─ vector_db.py    # Qdrant Vector DB (user_id 지원)
 │  │  ├─ graph_db.py     # Neo4j Graph DB (user_id 지원)
-│  │  ├─ notion.py       # Notion
 │  │  └─ github.py       # GitHub (OAuth 추가)
 │  ├─ background/        # 백그라운드 작업
 │  │  ├─ wal.py         # Write-Ahead Log (user_id 지원)
@@ -94,8 +100,8 @@ ts-llm-mcp-bridge/
 │     ├─ server.py       # stdio JSON-RPC 서버
 │     └─ tools/          # MCP 툴들
 │        ├─ post_blog_article.py
-│        ├─ publish_to_notion.py
-│        └─ create_commit_and_push.py
+│        ├─ search_vector_db.py
+│        └─ search_graph_db.py
 ├─ data/                 # 데이터 파일 (git ignored)
 │  ├─ users.db          # 사용자 DB (SQLite, NEW)
 │  ├─ wal.jsonl         # WAL 메타데이터
@@ -123,7 +129,12 @@ JAVA_BACKEND_JWKS_URL=https://java-backend.example.com/.well-known/jwks.json
 JAVA_BACKEND_JWT_ISSUER=https://java-backend.example.com
 JAVA_BACKEND_JWT_AUDIENCE=ts-llm-mcp
 
-# (선택) 서비스 간 JWT 설정
+# 서비스 간 JWT (자동 갱신)
+JAVA_BACKEND_SERVICE_CLIENT_ID=python-api
+JAVA_BACKEND_SERVICE_CLIENT_SECRET=super-secret
+JAVA_BACKEND_SERVICE_JWT_SCOPE=internal-api
+JAVA_BACKEND_SERVICE_JWT_REFRESH_PATH=/api/v1/auth/service-jwt
+# (선택) 초기 토큰 (refresh 미사용 시)
 JAVA_BACKEND_SERVICE_JWT=<static-service-token>
 JAVA_BACKEND_SERVICE_JWT_AUDIENCE=python-internal
 JAVA_BACKEND_SERVICE_JWT_ISSUER=https://java-backend.example.com
@@ -285,9 +296,6 @@ EMBED_BATCH_SIZE=100
 GRAPH_DB_URL=bolt://localhost:7687
 GRAPH_DB_USER=neo4j
 GRAPH_DB_PASSWORD=your-graph-db-password
-
-# Notion
-NOTION_TOKEN=your-notion-token
 
 # LLM API (OpenAI)
 OPENAI_API_KEY=your-openai-api-key
@@ -579,8 +587,8 @@ MCP 클라이언트가 stdin/stdout으로 JSON-RPC 메시지를 교환할 수 �
 ## 사용 가능한 툴
 
 1. **post_blog_article** - 블로그 글 발행 (RAG를 통한 정확도 향상)
-2. **publish_to_notion** - Notion 페이지 발행
-3. **create_commit_and_push** - Git 커밋 & 푸시
+2. **search_vector_db** - Vector DB 기반 의미 검색
+3. **search_graph_db** - Graph DB 기반 구조/호출 관계 검색
 
 > **참고**: 코드 인덱스 업데이트는 클라이언트(VSCode Extension)가 `/api/v1/diffs/apply`를 통해 자동으로 처리합니다.
 
