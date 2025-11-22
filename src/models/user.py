@@ -1,7 +1,8 @@
 """User model and schema.
 
 사용자 정보를 표현하는 모델입니다.
-GitHub OAuth와 Java 백엔드가 관리하는 사용자 정보를 다룹니다.
+주석 처리: GitHub OAuth 인증은 TS ↔ Java 서버 사이에서만 처리되므로 Python 서버에서는 관여하지 않음
+Java 백엔드가 관리하는 사용자 정보를 다룹니다.
 """
 from __future__ import annotations
 
@@ -14,8 +15,8 @@ from pydantic import BaseModel, Field
 class User(BaseModel):
     """사용자 모델.
     
-    GitHub OAuth로 인증된 사용자 정보를 담습니다.
-    Java 백엔드가 발급한 JWT를 사용하여 인증합니다.
+    주석 처리: GitHub OAuth 인증은 TS ↔ Java 서버 사이에서만 처리되므로 Python 서버에서는 관여하지 않음
+    Java 서버에서 이미 인증을 완료했고, 요청 본문에 user_id를 포함하여 전달함.
     
     Attributes:
         id: 내부 사용자 ID

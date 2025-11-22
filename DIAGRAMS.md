@@ -2,6 +2,201 @@
 
 This document contains Mermaid diagrams visualizing the architecture and workflows of the Clog system (TS-LLM-MCP Bridge).
 
+## LLM Agent Flow - Class Diagram
+
+The following class diagram illustrates the LLM agent flow from Java server request to blog publishing:
+
+```mermaid
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#fff', 'primaryTextColor':'#000', 'primaryBorderColor':'#000', 'lineColor':'#000', 'secondaryColor':'#f0f0f0', 'tertiaryColor':'#fff', 'mainBkg':'#fff', 'secondBkg':'#f0f0f0', 'mainContrastColor':'#000', 'darkMode':'false', 'background':'#fff', 'tertiaryBorderColor':'#000', 'tertiaryTextColor':'#000', 'fontSize':'16px', 'nodeBorder':'#000', 'clusterBkg':'#f0f0f0', 'clusterBorder':'#000', 'titleColor':'#000', 'edgeLabelBackground':'#fff', 'classText':'#000'}}}%%
+classDiagram
+    %% External Systems
+    class JavaServer {
+        +POST /internal/v1/llm/execute
+        +receive_llm_response()
+    }
+
+    %% FastAPI Router Layer
+    class AgentRouter {
+        +execute_llm_command(request: LLMExecuteRequest)
+        +call_llm_with_tools(prompt, context, tools, model)
+        +_execute_regular_tool(tool_name, params)
+        +_generate_final_response(prompt, tool_calls, model)
+        +_fallback_tool_selection(prompt, context)
+    }
+
+    %% LLM Service
+    class LLMService {
+        +AsyncOpenAI client
+        +system_prompt: str
+        +analyze_request(prompt, context, tools)
+        +decide_tool_usage()
+        +generate_response()
+    }
+
+    %% Tool Registry
+    class TOOLS_REGISTRY {
+        +post_blog_article: PostBlogArticleTool
+        +get_available_tools()
+    }
+
+    %% MCP Tool
+    class PostBlogArticleTool {
+        +TOOL: dict
+        +run(params: Dict) Dict
+        +validate_params(params)
+    }
+
+    %% Adapter Layer
+    class BlogAPIAdapter {
+        +publish_article(title, markdown, tags, api_key) Dict
+    }
+
+    class JavaBackendAdapter {
+        +create_blog_post(api_key, payload) Dict
+        +_request(method, path, json_body, headers) Dict
+    }
+
+    %% Data Models
+    class LLMExecuteRequest {
+        +user_id: int
+        +prompt: str
+        +context: Dict[str, Any]
+        +model: Optional[str]
+        +max_iterations: int
+    }
+
+    class LLMExecuteResult {
+        +ok: bool
+        +thought: Optional[str]
+        +tool_calls: List[ToolCall]
+        +final_response: str
+        +model_used: Optional[str]
+    }
+
+    class ToolCall {
+        +tool: str
+        +params: Dict[str, Any]
+        +result: Any
+        +success: bool
+    }
+
+    class Settings {
+        +OPENAI_API_KEY: str
+        +BLOG_API_KEY: str
+        +DEFAULT_LLM_MODEL: str
+        +LLM_TEMPERATURE: float
+        +LLM_MAX_TOKENS: int
+    }
+
+    %% Relationships
+    JavaServer --> AgentRouter : POST /internal/v1/llm/execute
+    AgentRouter --> LLMExecuteRequest : receives
+    AgentRouter --> LLMService : uses
+    AgentRouter --> TOOLS_REGISTRY : queries
+    AgentRouter --> LLMExecuteResult : returns
+    LLMExecuteResult --> JavaServer : HTTP response
+
+    LLMService --> Settings : reads OPENAI_API_KEY
+    LLMService --> TOOLS_REGISTRY : gets available tools
+    LLMService ..> AgentRouter : returns tool_calls
+
+    TOOLS_REGISTRY --> PostBlogArticleTool : contains
+    AgentRouter --> PostBlogArticleTool : executes
+    PostBlogArticleTool --> BlogAPIAdapter : calls
+    PostBlogArticleTool --> Settings : reads BLOG_API_KEY
+    BlogAPIAdapter --> JavaBackendAdapter : uses
+    JavaBackendAdapter --> JavaServer : HTTP POST /api/v1/blog/posts
+
+    AgentRouter --> ToolCall : creates
+    LLMExecuteResult --> ToolCall : contains
+```
+
+## LLM Agent Flow - Sequence Diagram
+
+The following sequence diagram shows the detailed flow of LLM request processing:
+
+```mermaid
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#fff', 'primaryTextColor':'#000', 'primaryBorderColor':'#000', 'lineColor':'#000', 'secondaryColor':'#f0f0f0', 'tertiaryColor':'#fff', 'noteTextColor':'#000', 'noteBkgColor':'#fff', 'noteBorderColor':'#000', 'actorTextColor':'#000', 'actorLineColor':'#000', 'signalColor':'#000', 'signalTextColor':'#000', 'labelBoxBkgColor':'#fff', 'labelBoxBorderColor':'#000', 'labelTextColor':'#000', 'loopTextColor':'#000', 'activationBorderColor':'#000', 'activationBkgColor':'#f0f0f0', 'sequenceNumberColor':'#000'}}}%%
+sequenceDiagram
+    participant JavaServer as Java Server
+    participant AgentRouter as AgentRouter<br/>(Python)
+    participant LLMService as LLM Service<br/>(OpenAI)
+    participant ToolRegistry as TOOLS_REGISTRY
+    participant BlogTool as PostBlogArticleTool
+    participant BlogAPI as BlogAPIAdapter
+    participant JavaBackend as JavaBackendAdapter
+
+    %% Request Flow
+    rect rgb(200, 220, 250)
+        Note over JavaServer,JavaBackend: LLM Request Processing Flow
+        JavaServer->>AgentRouter: POST /internal/v1/llm/execute<br/>{user_id, prompt, context}
+        AgentRouter->>ToolRegistry: Get available tools
+        ToolRegistry-->>AgentRouter: [post_blog_article]
+        
+        AgentRouter->>LLMService: call_llm_with_tools(prompt, context, tools)
+        Note over LLMService: System Prompt:<br/>"요청을 분석하여<br/>블로그 게시 필요 여부 판단"
+        LLMService->>LLMService: Analyze request<br/>(블로그 게시 필요?)
+        
+        alt 블로그 게시 필요
+            LLMService-->>AgentRouter: tool_calls: [post_blog_article]
+            AgentRouter->>BlogTool: run({title, markdown, tags})
+            BlogTool->>BlogAPI: publish_article(title, markdown, tags, api_key)
+            BlogAPI->>JavaBackend: create_blog_post(api_key, payload)
+            JavaBackend->>JavaServer: POST /api/v1/blog/posts<br/>(X-User-Api-Key header)
+            JavaServer-->>JavaBackend: {article_id, url, ...}
+            JavaBackend-->>BlogAPI: Blog post result
+            BlogAPI-->>BlogTool: {success: true, article: {...}}
+            BlogTool-->>AgentRouter: Tool execution result
+            AgentRouter->>LLMService: _generate_final_response(prompt, tool_calls)
+            LLMService-->>AgentRouter: Final response text
+        else 블로그 게시 불필요
+            LLMService-->>AgentRouter: tool_calls: []<br/>(no tools)
+            Note over AgentRouter: LLM이 직접 답변 생성
+            AgentRouter->>LLMService: _generate_final_response(prompt, [])
+            LLMService-->>AgentRouter: Direct response text
+        end
+        
+        AgentRouter->>AgentRouter: Create LLMExecuteResult<br/>{ok, thought, tool_calls, final_response}
+        AgentRouter-->>JavaServer: HTTP 200<br/>LLMExecuteResult
+    end
+```
+
+## Component Descriptions
+
+### AgentRouter
+- **execute_llm_command**: Main endpoint that receives LLM execution requests from Java server
+- **call_llm_with_tools**: Calls OpenAI API with system prompt and available tools
+- **_execute_regular_tool**: Executes a tool from the registry
+- **_generate_final_response**: Generates user-friendly final response using LLM
+
+### LLMService
+- **System Prompt**: Instructs LLM to analyze requests and decide if blog publishing is needed
+- **Tool Selection**: LLM decides whether to use `post_blog_article` tool or respond directly
+- **Response Generation**: Creates final response based on tool execution results
+
+### PostBlogArticleTool
+- **TOOL**: Tool metadata (name, description, input_schema)
+- **run**: Executes blog publishing with title, markdown, and tags
+- Uses `settings.BLOG_API_KEY` from Python server .env
+
+### BlogAPIAdapter
+- **publish_article**: Publishes article via Java backend
+- Validates API key and formats payload
+
+### JavaBackendAdapter
+- **create_blog_post**: Sends HTTP POST request to Java server blog API
+- Uses `X-User-Api-Key` header for authentication
+
+## Decision Flow
+
+1. **Java Server** sends LLM request with `user_id`, `prompt`, and `context`
+2. **AgentRouter** receives request and gets available tools from registry
+3. **LLMService** analyzes the request using system prompt:
+   - If blog publishing is needed (explicit request like "블로그에 올려줘"): Selects `post_blog_article` tool
+   - If not needed (simple question): Responds directly without tools
+4. **If tool selected**: Tool executes → BlogAPIAdapter → JavaBackendAdapter → Java Server
+5. **Final response**: LLM generates user-friendly response and returns to Java Server
+
 ## Sequence Diagram
 
 The following sequence diagram illustrates the main workflows in the system:
@@ -205,7 +400,7 @@ classDiagram
 
     %% Background Components
     class BackgroundScheduler {
-        +init_scheduler()
+        
         +start_scheduler()
         +shutdown_scheduler()
         +run_task_now()
@@ -324,4 +519,3 @@ classDiagram
 3. **Fault Tolerance**: Background scheduler automatically retries failed operations
 4. **Clean Architecture**: Adapter pattern separates external service integrations
 5. **Dual Interface**: REST API for clients + MCP for LLM integration
-

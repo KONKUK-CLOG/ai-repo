@@ -40,6 +40,8 @@ class UserPublic(BaseModel):
 class AuthCallbackResponse(BaseModel):
     """GitHub OAuth callback 응답 모델.
     
+    주석 처리: GitHub OAuth 인증은 TS ↔ Java 서버 사이에서만 처리되므로 Python 서버에서는 사용하지 않음
+    
     인증 성공 후 클라이언트에게 반환되는 정보입니다.
     서버 간 통신용 JWT는 서버 내부에서만 사용되며 클라이언트에는 반환되지 않습니다.
     
@@ -120,17 +122,20 @@ class DiffApplyRequest(BaseModel):
     둘 중 하나는 반드시 제공되어야 합니다.
     
     Attributes:
+        user_id: Java 서버에서 전달된 사용자 ID (필수)
         unified: Git unified diff 형식의 패치 문자열
             예: "--- a/file.py\n+++ b/file.py\n@@ -1,3 +1,3 @@\n-old\n+new"
         files: DiffFileItem 객체 배열
     
     Example (unified 모드):
         >>> request = DiffApplyRequest(
+        ...     user_id=123,
         ...     unified="--- a/test.py\n+++ b/test.py\n..."
         ... )
     
     Example (files 모드):
         >>> request = DiffApplyRequest(
+        ...     user_id=123,
         ...     files=[
         ...         DiffFileItem(
         ...             path="src/main.py",
@@ -140,12 +145,14 @@ class DiffApplyRequest(BaseModel):
         ...     ]
         ... )
     """
+    user_id: int = Field(..., description="User ID from Java server")
     unified: Optional[str] = Field(None, description="Unified diff patch string")
     files: Optional[List[DiffFileItem]] = Field(None, description="Array of file changes")
     
     class Config:
         json_schema_extra = {
             "example": {
+                "user_id": 123,
                 "files": [
                     {
                         "path": "src/main.py",
@@ -198,6 +205,7 @@ class LLMExecuteRequest(BaseModel):
     TS 클라이언트는 사용자 의도만 전달하고, 구체적인 툴 선택은 LLM이 담당합니다.
     
     Attributes:
+        user_id: Java 서버에서 전달된 사용자 ID (필수)
         prompt: 사용자의 자연어 명령
             예: "이 코드 변경사항을 인덱스에 반영하고 블로그 글도 써줘"
         context: 추가 컨텍스트 정보 (코드 diff, 파일 목록, 메타데이터 등)
@@ -207,14 +215,15 @@ class LLMExecuteRequest(BaseModel):
     
     Example:
         >>> request = LLMExecuteRequest(
-        ...     prompt="이 코드를 인덱스에 추가하고 블로그 글도 써줘",
+        ...     user_id=123,
+        ...     prompt="이 코드 변경 내용을 요약해서 블로그에 올려줘",
         ...     context={
-        ...         "diff": {"files": [...]},
-        ...         "repo": "my-project"
+        ...         "code_changes": "새로운 기능 추가: 사용자 인증 로직 구현"
         ...     },
-        ...     model="claude-3-5-sonnet"
+        ...     model="gpt-4-turbo-preview"
         ... )
     """
+    user_id: int = Field(..., description="User ID from Java server")
     prompt: str = Field(..., description="사용자의 자연어 명령")
     context: Dict[str, Any] = Field(
         default_factory=dict,
@@ -234,18 +243,12 @@ class LLMExecuteRequest(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "prompt": "코드 변경사항을 인덱스에 반영하고, 변경 내용을 요약해서 블로그에 올려줘",
+                "user_id": 123,
+                "prompt": "이 코드 변경 내용을 요약해서 블로그에 올려줘",
                 "context": {
-                    "diff": {
-                        "files": [
-                            {
-                                "path": "src/main.py",
-                                "status": "modified"
-                            }
-                        ]
-                    }
+                    "code_changes": "새로운 기능 추가: 사용자 인증 로직 구현"
                 },
-                "model": "claude-3-5-sonnet"
+                "model": "gpt-4-turbo-preview"
             }
         }
 
@@ -288,12 +291,11 @@ class LLMExecuteResult(BaseModel):
     Example:
         >>> result = LLMExecuteResult(
         ...     ok=True,
-        ...     thought="사용자가 블로그 발행과 Notion 페이지 발행을 요청했음",
+        ...     thought="사용자가 블로그 발행을 요청했음",
         ...     tool_calls=[
-        ...         ToolCall(tool="post_blog_article", ...),
-        ...         ToolCall(tool="publish_to_notion", ...)
+        ...         ToolCall(tool="post_blog_article", ...)
         ...     ],
-        ...     final_response="블로그 글을 발행하고 Notion 페이지를 발행했습니다.",
+        ...     final_response="블로그 글을 발행했습니다.",
         ...     model_used="claude-3-5-sonnet"
         ... )
     """
@@ -373,13 +375,14 @@ class CommandExecuteRequest(BaseModel):
     각 툴은 고유한 파라미터 스키마를 가지고 있습니다.
     
     Attributes:
+        user_id: Java 서버에서 전달된 사용자 ID (필수)
         name: 실행할 툴의 이름
-            가능한 값: "post_blog_article", "publish_to_notion",
-                      "create_commit_and_push"
+            가능한 값: "post_blog_article"
         params: 툴별 파라미터 딕셔너리
     
     Example:
         >>> request = CommandExecuteRequest(
+        ...     user_id=123,
         ...     name="post_blog_article",
         ...     params={
         ...         "title": "My Article",
@@ -387,12 +390,14 @@ class CommandExecuteRequest(BaseModel):
         ...     }
         ... )
     """
+    user_id: int = Field(..., description="User ID from Java server")
     name: str = Field(..., description="Tool name to execute")
     params: Dict[str, Any] = Field(default_factory=dict, description="Tool parameters")
     
     class Config:
         json_schema_extra = {
             "example": {
+                "user_id": 123,
                 "name": "post_blog_article",
                 "params": {
                     "title": "My Article",
@@ -412,8 +417,6 @@ class CommandExecuteResult(BaseModel):
         tool: 실행된 툴의 이름
         result: 툴 실행 결과 (툴마다 다른 형식)
             - post_blog_article: {"success": True, "article": {...}}
-            - publish_to_notion: {"success": True, "page_id": "..."}
-            - create_commit_and_push: {"success": True, "commit_sha": "..."}
             - 등등
     
     Example:
@@ -464,7 +467,7 @@ class ToolSchema(BaseModel):
 class CommandsListResponse(BaseModel):
     """사용 가능한 명령(툴) 목록 응답 모델.
     
-    GET /api/v1/commands 엔드포인트의 응답으로 사용됩니다.
+    GET /internal/v1/commands 엔드포인트의 응답으로 사용됩니다.
     
     Attributes:
         tools: 사용 가능한 모든 툴의 스키마 배열
@@ -472,8 +475,7 @@ class CommandsListResponse(BaseModel):
     Example:
         >>> response = CommandsListResponse(
         ...     tools=[
-        ...         ToolSchema(name="post_blog_article", ...),
-        ...         ToolSchema(name="publish_to_notion", ...)
+        ...         ToolSchema(name="post_blog_article", ...)
         ...     ]
         ... )
     """

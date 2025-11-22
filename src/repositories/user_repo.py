@@ -23,14 +23,18 @@ class UserRepository:
     """Proxy user repository interacting with the Java backend."""
 
     async def get_by_id(self, user_id: int, bearer_token: Optional[str] = None) -> Optional[User]:
-        """Fetch a user by ID using the provided JWT token.
+        """Fetch a user by ID from the Java backend.
+        
+        주석 처리: bearer_token 파라미터는 유지하되 사용하지 않음 (호환성 유지)
+        현재는 같은 EC2 내부 통신이므로 JWT 불필요
         
         Args:
             user_id: 사용자 ID
-            bearer_token: Java 서버로 전달할 JWT 토큰 (선택적)
+            bearer_token: Java 서버로 전달할 JWT 토큰 (현재는 사용하지 않음, 호환성 유지)
         """
         try:
-            payload = await java_backend.get_user_by_id(user_id, bearer_token=bearer_token)
+            # 주석 처리: JWT 없이 요청 (같은 EC2 내부 통신)
+            payload = await java_backend.get_user_by_id(user_id, bearer_token=None)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
                 logger.info("User %s not found in Java backend", user_id)

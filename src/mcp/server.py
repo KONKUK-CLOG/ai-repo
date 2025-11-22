@@ -3,7 +3,7 @@
 MCP (Model Context Protocol) 서버 구현
 - stdio(표준 입출력) 기반 JSON-RPC 2.0 통신
 - Claude Desktop 등 LLM 클라이언트와 통합
-- 외부 도구(블로그, Git, Notion 등) 호출 브릿지 역할
+- 외부 도구(블로그, Git 등) 호출 브릿지 역할
 
 주요 기능:
 - initialize: 서버 초기화 및 capability 협상
@@ -27,10 +27,9 @@ import logging
 from typing import Dict, Any, List
 from src.mcp.tools import (
     post_blog_article,
-    publish_to_notion,
-    create_commit_and_push,
-    search_vector_db,
-    search_graph_db
+    # 주석 처리: RAG 관련 툴은 다음 학기 구현 예정
+    # search_vector_db,
+    # search_graph_db
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -40,20 +39,18 @@ logger = logging.getLogger(__name__)
 # 각 도구는 TOOL(메타데이터)과 run(실행 함수)를 제공
 TOOLS = [
     post_blog_article.TOOL,         # 블로그 글 게시
-    publish_to_notion.TOOL,          # Notion 페이지 게시
-    create_commit_and_push.TOOL,     # Git 커밋 및 푸시
-    search_vector_db.TOOL,           # Vector DB 의미론적 검색
-    search_graph_db.TOOL,            # Graph DB 구조적 검색
+    # 주석 처리: RAG 관련 툴은 다음 학기 구현 예정
+    # search_vector_db.TOOL,           # Vector DB 의미론적 검색
+    # search_graph_db.TOOL,            # Graph DB 구조적 검색
 ]
 
 # Tool executors (도구 실행 함수 매핑)
 # tool_name → async run(arguments) 함수
 TOOL_EXECUTORS = {
     "post_blog_article": post_blog_article.run,
-    "publish_to_notion": publish_to_notion.run,
-    "create_commit_and_push": create_commit_and_push.run,
-    "search_vector_db": search_vector_db.run,
-    "search_graph_db": search_graph_db.run,
+    # 주석 처리: RAG 관련 툴은 다음 학기 구현 예정
+    # "search_vector_db": search_vector_db.run,
+    # "search_graph_db": search_graph_db.run,
 }
 
 

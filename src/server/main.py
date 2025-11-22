@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.server.routers import health, diffs, agent, auth
 from src.server.settings import settings
 from src.background.scheduler import start_scheduler, shutdown_scheduler, run_task_now
-from src.server.deps import get_java_service_identity
+# from src.server.deps import get_java_service_identity  # 주석 처리: 서비스 간 JWT 통신 시 사용했던 함수. 현재는 같은 EC2 내부 통신이므로 JWT 불필요
 
 # Configure logging
 logging.basicConfig(
@@ -84,42 +84,42 @@ async def root():
 
 
 # Admin endpoints for manual triggers
-@app.post("/api/v1/admin/wal-recovery")
-async def trigger_wal_recovery(
-    _: dict = Depends(get_java_service_identity),
-):
-    """수동으로 WAL 복구 트리거 (관리자 전용)
-    
-    실패한 WAL 작업을 즉시 재시도합니다.
-    """
-    asyncio.create_task(run_task_now("wal_recovery"))
-    return {"message": "WAL recovery task triggered"}
-
-
-@app.post("/api/v1/admin/wal-cleanup")
-async def trigger_wal_cleanup(
-    _: dict = Depends(get_java_service_identity),
-):
-    """수동으로 WAL 정리 트리거 (관리자 전용)
-    
-    7일 이상 된 성공한 WAL 엔트리를 삭제합니다.
-    """
-    asyncio.create_task(run_task_now("wal_cleanup"))
-    return {"message": "WAL cleanup task triggered"}
-
-
-@app.get("/api/v1/admin/wal-stats")
-async def get_wal_stats(
-    _: dict = Depends(get_java_service_identity),
-):
-    """WAL 통계 조회
-    
-    Returns:
-        전체 WAL 엔트리 수, 상태별 카운트
-    """
-    from src.background.wal import wal
-    stats = await wal.get_statistics()
-    return stats
+# 주석 처리: WAL 관련 엔드포인트는 다음 학기 구현 예정
+# 현재는 엔드포인트 구조만 유지하고, 실제 처리는 하지 않습니다.
+# @app.post("/api/v1/admin/wal-recovery")
+# async def trigger_wal_recovery():
+#     """수동으로 WAL 복구 트리거 (관리자 전용)
+#     
+#     실패한 WAL 작업을 즉시 재시도합니다.
+#     Java 서버에서만 호출되므로 별도 인증 없이 사용 가능 (같은 EC2 내부 통신)
+#     """
+#     asyncio.create_task(run_task_now("wal_recovery"))
+#     return {"message": "WAL recovery task triggered"}
+# 
+# 
+# @app.post("/api/v1/admin/wal-cleanup")
+# async def trigger_wal_cleanup():
+#     """수동으로 WAL 정리 트리거 (관리자 전용)
+#     
+#     7일 이상 된 성공한 WAL 엔트리를 삭제합니다.
+#     Java 서버에서만 호출되므로 별도 인증 없이 사용 가능 (같은 EC2 내부 통신)
+#     """
+#     asyncio.create_task(run_task_now("wal_cleanup"))
+#     return {"message": "WAL cleanup task triggered"}
+# 
+# 
+# @app.get("/api/v1/admin/wal-stats")
+# async def get_wal_stats():
+#     """WAL 통계 조회
+#     
+#     Returns:
+#         전체 WAL 엔트리 수, 상태별 카운트
+#     
+#     Java 서버에서만 호출되므로 별도 인증 없이 사용 가능 (같은 EC2 내부 통신)
+#     """
+#     from src.background.wal import wal
+#     stats = await wal.get_statistics()
+#     return stats
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """LLM agent endpoints for natural language command execution."""
-from fastapi import APIRouter, Depends, HTTPException, status
-from src.server.deps import get_current_user
-from src.models.user import User
+from fastapi import APIRouter, HTTPException, status
+# from src.server.deps import get_current_user  # 주석 처리: TS 직접 통신 시 사용했던 함수. 현재는 Java 서버를 통해 내부 통신하므로 사용하지 않음
+# from src.models.user import User  # 주석 처리: JWT 인증이 필요 없으므로 User 모델 사용하지 않음
 from src.server.schemas import (
     LLMExecuteRequest,
     LLMExecuteResult,
@@ -11,15 +11,14 @@ from src.server.settings import settings
 from openai import AsyncOpenAI
 from src.mcp.tools import (
     post_blog_article,
-    publish_to_notion,
-    create_commit_and_push,
-    search_vector_db,
-    search_graph_db
+    # 주석 처리: RAG 관련 툴은 다음 학기 구현 예정
+    # search_vector_db,
+    # search_graph_db
 )
 import logging
 import json
 
-router = APIRouter(prefix="/api/v1/llm", tags=["llm-agent"])
+router = APIRouter(prefix="/internal/v1/llm", tags=["llm-agent"])
 logger = logging.getLogger(__name__)
 
 # ============================================================================
@@ -30,10 +29,9 @@ logger = logging.getLogger(__name__)
 # agent.py와 commands.py에서 공유하여 사용
 TOOLS_REGISTRY = {
     "post_blog_article": post_blog_article,           # 블로그 글 발행
-    "publish_to_notion": publish_to_notion,           # Notion 페이지 발행
-    "create_commit_and_push": create_commit_and_push, # Git 커밋 & 푸시
-    "search_vector_db": search_vector_db,             # Vector DB 의미론적 검색
-    "search_graph_db": search_graph_db,               # Graph DB 구조적 검색
+    # 주석 처리: RAG 관련 툴은 다음 학기 구현 예정
+    # "search_vector_db": search_vector_db,             # Vector DB 의미론적 검색
+    # "search_graph_db": search_graph_db,               # Graph DB 구조적 검색
 }
 
 
@@ -43,6 +41,7 @@ async def _execute_regular_tool(tool_name: str, params: dict, user_api_key: str 
     Args:
         tool_name: Name of the tool to execute
         params: Parameters for the tool
+        user_api_key: 사용자 API 키 (현재는 사용하지 않음, settings에서 가져옴)
         
     Returns:
         Tool execution result
@@ -56,8 +55,10 @@ async def _execute_regular_tool(tool_name: str, params: dict, user_api_key: str 
     tool_module = TOOLS_REGISTRY[tool_name]
     effective_params = dict(params or {})
 
-    if user_api_key and tool_name == "post_blog_article":
-        effective_params.setdefault("api_key", user_api_key)
+    # 주석 처리: 블로그 API 키는 post_blog_article.run() 내부에서 settings.BLOG_API_KEY 사용
+    # if user_api_key and tool_name == "post_blog_article":
+    #     effective_params.setdefault("api_key", user_api_key)
+    
     if not hasattr(tool_module, "run"):
         raise ValueError(f"Tool '{tool_name}' has no run method")
     
@@ -97,27 +98,24 @@ async def call_llm_with_tools(
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     
     # 2. 시스템 프롬프트 구성
-    system_prompt = """당신은 코드 관리 및 문서화 작업을 돕는 AI 어시스턴트입니다.
-사용자의 요청을 분석하여 적절한 툴을 선택하고 실행하세요.
+    system_prompt = """당신은 사용자의 요청을 분석하고 적절히 응답하는 AI 어시스턴트입니다.
 
 사용 가능한 툴:
-- search_vector_db: 코드베이스에서 의미론적으로 유사한 코드 검색 (임베딩 기반)
-- search_graph_db: 코드 엔티티(함수/클래스)와 관계 구조 검색 (그래프 기반)
 - post_blog_article: 블로그에 글 발행
-- publish_to_notion: Notion에 페이지 발행
-- create_commit_and_push: Git 커밋 후 푸시
 
-RAG 도구 사용 가이드:
-- 블로그 글 작성이나 코드 설명이 필요한 경우, 먼저 RAG 도구로 관련 코드를 검색하세요
-- search_vector_db: 특정 기능이나 개념과 관련된 코드 내용을 찾을 때 사용
-- search_graph_db: 코드 구조, 함수 호출 관계, 엔티티 연결을 파악할 때 사용
-- 두 도구를 함께 사용하면 더 풍부한 컨텍스트를 얻을 수 있습니다
-- top_k/limit 파라미터로 검색 결과 수를 조절하세요 (기본값: 10)
-- user_id는 자동으로 제공되므로 파라미터에 포함하지 마세요
+작업 지침:
+1. 사용자의 요청을 먼저 분석하세요.
+2. 블로그 게시가 필요한 경우에만 post_blog_article 툴을 사용하세요.
+   - 블로그 게시가 필요한 경우: "블로그에 올려줘", "글을 작성해줘", "발행해줘" 등 명시적 요청
+   - 블로그 게시가 불필요한 경우: 단순 질문, 정보 요청, 설명 요청 등
+3. 블로그 게시가 필요하지 않은 경우, 툴을 사용하지 않고 직접 답변하세요.
 
-참고: 코드 인덱스 업데이트는 클라이언트(VSCode Extension)가 /api/v1/diffs/apply를 통해 자동으로 처리합니다.
+블로그 글 작성 시 고려사항:
+- 제목(title): 명확하고 매력적인 제목
+- 내용(markdown): 마크다운 형식으로 구조화된 글
+- 태그(tags): 선택적으로 관련 태그 추가
 
-컨텍스트에 있는 정보를 최대한 활용하여 적절한 파라미터를 구성하세요."""
+입력된 내용만을 기반으로 답변을 생성하며, 외부 코드베이스 검색은 수행하지 않습니다."""
     
     # 3. 사용자 메시지 구성
     context_str = json.dumps(context, ensure_ascii=False, indent=2) if context else "없음"
@@ -208,24 +206,7 @@ def _fallback_tool_selection(prompt: str, context: dict) -> tuple[str, list[dict
             }
         })
     
-    if "노션" in prompt_lower or "notion" in prompt_lower:
-        tool_calls.append({
-            "tool": "publish_to_notion",
-            "params": {
-                "title": "자동 생성 페이지",
-                "content": prompt
-            }
-        })
     
-    if "커밋" in prompt_lower or "commit" in prompt_lower or "push" in prompt_lower:
-        tool_calls.append({
-            "tool": "create_commit_and_push",
-            "params": {
-                "repo_path": context.get("repo_path", "."),
-                "files": context.get("files", []),
-                "commit_message": "Auto commit"
-            }
-        })
     
     # 아무 툴도 선택되지 않은 경우
     if not tool_calls:
@@ -237,7 +218,6 @@ def _fallback_tool_selection(prompt: str, context: dict) -> tuple[str, list[dict
 @router.post("/execute", response_model=LLMExecuteResult)
 async def execute_llm_command(
     request: LLMExecuteRequest,
-    user: User = Depends(get_current_user),
 ) -> LLMExecuteResult:
     """사용자의 자연어 명령을 LLM이 해석하고 실행합니다.
     
@@ -250,8 +230,7 @@ async def execute_llm_command(
     6. LLM의 최종 응답을 사용자에게 반환
     
     Args:
-        request: LLM 실행 요청 (프롬프트, 컨텍스트 등)
-        user: 인증된 사용자 (JWT에서 자동 추출 및 검증)
+        request: LLM 실행 요청 (user_id, 프롬프트, 컨텍스트 등)
         
     Returns:
         LLM 실행 결과 (사고 과정, 툴 호출 목록, 최종 응답)
@@ -283,11 +262,13 @@ async def execute_llm_command(
             params = tool_call_plan["params"]
             
             try:
+                # 주석 처리: RAG 툴 관련 로직은 다음 학기 구현 예정
                 # RAG 툴의 경우 user_id를 자동으로 주입
-                if tool_name in ["search_vector_db", "search_graph_db"]:
-                    params["user_id"] = user.id
+                # if tool_name in ["search_vector_db", "search_graph_db"]:
+                #     params["user_id"] = request.user_id  # 요청 본문에서 사용자 ID 추출
                 
-                # 모든 툴은 일반 실행 (RAG는 별도 툴로 LLM이 선택)
+                # 모든 툴은 일반 실행
+                # 블로그 API 키는 settings.BLOG_API_KEY에서 자동으로 가져옴
                 result = await _execute_regular_tool(
                     tool_name,
                     params,

@@ -12,17 +12,17 @@ agent.py와 달리 LLM이 개입하지 않으며, 개발자가 이미 어떤 툴
 - 디버깅 및 개발 편의성
 
 엔드포인트:
-- GET /api/v1/commands: 사용 가능한 툴 목록 및 스키마 조회
-- POST /api/v1/commands/execute: 지정된 툴 실행
+- GET /internal/v1/commands: 사용 가능한 툴 목록 및 스키마 조회 (Java 서버 내부 통신용)
+- POST /internal/v1/commands/execute: 지정된 툴 실행 (Java 서버 내부 통신용)
 
 차이점:
 - commands.py: 개발자가 툴 이름을 명시적으로 지정 (개발 전용)
 - agent.py: LLM이 자연어 명령을 분석하여 툴 자동 선택 (프로덕션)
 """
-from fastapi import APIRouter, Depends, HTTPException, Header, status
+from fastapi import APIRouter, HTTPException, Header, status
 from typing import Optional
-from src.server.deps import get_current_user
-from src.models.user import User
+# from src.server.deps import get_current_user  # 주석 처리: TS 직접 통신 시 사용했던 함수. 현재는 Java 서버를 통해 내부 통신하므로 사용하지 않음
+# from src.models.user import User  # 주석 처리: JWT 인증이 필요 없으므로 User 모델 사용하지 않음
 from src.server.schemas import (
     CommandExecuteRequest,
     CommandExecuteResult,
@@ -33,14 +33,12 @@ from src.server.routers.agent import TOOLS_REGISTRY
 import logging
 import uuid
 
-router = APIRouter(prefix="/api/v1/commands", tags=["commands (dev only)"])
+router = APIRouter(prefix="/internal/v1/commands", tags=["commands (dev only)"])
 logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=CommandsListResponse)
-async def list_commands(
-    user: User = Depends(get_current_user)
-) -> CommandsListResponse:
+async def list_commands() -> CommandsListResponse:
     """사용 가능한 모든 툴의 메타데이터를 조회합니다.
     
     이 엔드포인트는 다음 용도로 사용됩니다:
@@ -54,15 +52,11 @@ async def list_commands(
     - description: 툴의 기능 설명
     - input_schema: JSON Schema 형식의 입력 파라미터 스키마
     
-    Args:
-        user: 인증된 사용자 (헤더에서 자동 추출 및 검증)
-        
     Returns:
         사용 가능한 모든 툴의 스키마 목록
         
     Example:
-        >>> GET /api/v1/commands
-        >>> Headers: {"Authorization": "Bearer <jwt-token>"}
+        >>> GET /internal/v1/commands
         >>> Response:
         {
             "tools": [
@@ -105,7 +99,6 @@ async def list_commands(
 @router.post("/execute", response_model=CommandExecuteResult)
 async def execute_command(
     request: CommandExecuteRequest,
-    user: User = Depends(get_current_user),
     x_idempotency_key: Optional[str] = Header(None),
 ) -> CommandExecuteResult:
     """지정된 툴을 실행합니다.
@@ -127,9 +120,9 @@ async def execute_command(
     
     Args:
         request: 툴 실행 요청
+            - user_id: Java 서버에서 전달된 사용자 ID (필수)
             - name: 실행할 툴 이름 (예: "post_blog_article")
             - params: 툴별 파라미터 딕셔너리
-        user: 인증된 사용자 (JWT에서 자동 추출 및 검증)
         x_idempotency_key: 선택적 Idempotency Key (중복 방지용)
         
     Returns:
@@ -144,12 +137,12 @@ async def execute_command(
             - 500: 툴 실행 중 에러 발생
     
     Example (성공):
-        >>> POST /api/v1/commands/execute
+        >>> POST /internal/v1/commands/execute
         >>> Headers: {
-        >>>     "Authorization": "Bearer <jwt-token>",
         >>>     "x-idempotency-key": "abc-123"
         >>> }
         >>> Body: {
+        >>>     "user_id": 123,
         >>>     "name": "post_blog_article",
         >>>     "params": {
         >>>         "title": "FastAPI 시작하기",
