@@ -7,7 +7,6 @@ This document contains Mermaid diagrams visualizing the architecture and workflo
 The following class diagram illustrates the LLM agent flow from Java server request to blog publishing:
 
 ```mermaid
-%%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#fff', 'primaryTextColor':'#000', 'primaryBorderColor':'#000', 'lineColor':'#000', 'secondaryColor':'#f0f0f0', 'tertiaryColor':'#fff', 'mainBkg':'#e8f4f8', 'secondBkg':'#f0f0f0', 'mainContrastColor':'#000', 'darkMode':'false', 'background':'#ffffff', 'tertiaryBorderColor':'#000', 'tertiaryTextColor':'#000', 'fontSize':'16px', 'nodeBorder':'#2c3e50', 'clusterBkg':'#ecf0f1', 'clusterBorder':'#34495e', 'titleColor':'#000', 'edgeLabelBackground':'#fff', 'classText':'#000'}}}%%
 classDiagram
     %% External Systems
     class JavaServer {
@@ -89,26 +88,26 @@ classDiagram
     }
 
     %% Relationships
-    JavaServer --> AgentRouter : POST /internal/v1/llm/execute
-    AgentRouter --> LLMExecuteRequest : receives
-    AgentRouter --> LLMService : uses
-    AgentRouter --> TOOLS_REGISTRY : queries
-    AgentRouter --> LLMExecuteResult : returns
-    LLMExecuteResult --> JavaServer : HTTP response
+    JavaServer --> AgentRouter
+    AgentRouter --> LLMExecuteRequest
+    AgentRouter --> LLMService
+    AgentRouter --> TOOLS_REGISTRY
+    AgentRouter --> LLMExecuteResult
+    LLMExecuteResult --> JavaServer
 
-    LLMService --> Settings : reads OPENAI_API_KEY
-    LLMService --> TOOLS_REGISTRY : gets available tools
-    LLMService ..> AgentRouter : returns tool_calls
+    LLMService --> Settings
+    LLMService --> TOOLS_REGISTRY
+    LLMService ..> AgentRouter
 
-    TOOLS_REGISTRY --> PostBlogArticleTool : contains
-    AgentRouter --> PostBlogArticleTool : executes
-    PostBlogArticleTool --> BlogAPIAdapter : calls
-    PostBlogArticleTool --> Settings : reads BLOG_API_KEY
-    BlogAPIAdapter --> JavaBackendAdapter : uses
-    JavaBackendAdapter --> JavaServer : HTTP POST /api/v1/blog/posts
+    TOOLS_REGISTRY --> PostBlogArticleTool
+    AgentRouter --> PostBlogArticleTool
+    PostBlogArticleTool --> BlogAPIAdapter
+    PostBlogArticleTool --> Settings
+    BlogAPIAdapter --> JavaBackendAdapter
+    JavaBackendAdapter --> JavaServer
 
-    AgentRouter --> ToolCall : creates
-    LLMExecuteResult --> ToolCall : contains
+    AgentRouter --> ToolCall
+    LLMExecuteResult --> ToolCall
 
     %% Styling with CSS classes
     classDef javaServer fill:#e74c3c,stroke:#c0392b,stroke-width:3px,color:#fff
@@ -128,7 +127,9 @@ classDiagram
     class PostBlogArticleTool blogTool
     class BlogAPIAdapter blogAdapter
     class JavaBackendAdapter javaAdapter
-    class LLMExecuteRequest,LLMExecuteResult,ToolCall dataModel
+    class LLMExecuteRequest dataModel
+    class LLMExecuteResult dataModel
+    class ToolCall dataModel
     class Settings settings
 ```
 
