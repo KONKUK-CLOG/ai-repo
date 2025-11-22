@@ -120,17 +120,6 @@ classDiagram
     classDef dataModel fill:#95a5a6,stroke:#7f8c8d,stroke-width:3px,color:#fff
     classDef settings fill:#34495e,stroke:#2c3e50,stroke-width:3px,color:#fff
 
-    class JavaServer javaServer
-    class AgentRouter agentRouter
-    class LLMService llmService
-    class TOOLS_REGISTRY toolRegistry
-    class PostBlogArticleTool blogTool
-    class BlogAPIAdapter blogAdapter
-    class JavaBackendAdapter javaAdapter
-    class LLMExecuteRequest dataModel
-    class LLMExecuteResult dataModel
-    class ToolCall dataModel
-    class Settings settings
 ```
 
 ## LLM Agent Flow - Sequence Diagram
