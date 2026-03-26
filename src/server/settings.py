@@ -1,11 +1,18 @@
 """Application settings loaded from environment variables."""
-from pydantic_settings import BaseSettings
 from typing import Optional
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application configuration settings."""
-    
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="ignore",
+    )
+
     # Server Configuration
     SERVER_HOST: str = "0.0.0.0"
     SERVER_PORT: int = 8000
@@ -45,7 +52,21 @@ class Settings(BaseSettings):
     GRAPH_DB_URL: str = "bolt://localhost:7687"
     GRAPH_DB_USER: str = "neo4j"
     GRAPH_DB_PASSWORD: Optional[str] = None
+
+    # Codebase chunks in MongoDB (Lambda may use URI from env)
+    CODEBASE_MONGO_URI: Optional[str] = None
+    CODEBASE_MONGO_DB: str = "clog"
+    CODEBASE_MONGO_COLLECTION: str = "codebase_chunks"
+    CODEBASE_MONGO_USER_ID_FIELD: str = "user_id"
+    CODEBASE_MONGO_PATH_FIELD: str = "path"
+    CODEBASE_MONGO_CONTENT_FIELD: str = "content"
+    CODEBASE_MONGO_PREVIEW_MAX_CHARS: int = 2000
     
+    # GitHub OAuth (일부 라우트/테스트에서만 사용; TS↔Java 플로우에서는 생략 가능)
+    GITHUB_CLIENT_ID: Optional[str] = None
+    GITHUB_CLIENT_SECRET: Optional[str] = None
+    GITHUB_REDIRECT_URI: Optional[str] = None
+
     # LLM API Configuration
     OPENAI_API_KEY: Optional[str] = None
     DEFAULT_LLM_MODEL: str = "gpt-4-turbo-preview"
@@ -54,13 +75,11 @@ class Settings(BaseSettings):
     
     # Feature Flags
     ENABLE_DIRECT_TOOLS: bool = False  # 개발 환경에서만 직접 툴 실행 엔드포인트 활성화
+    # Lambda 등 무상태 배포: 백그라운드 스케줄러·서비스 토큰 루프 비활성화
+    ENABLE_BACKGROUND_TASKS: bool = True
     
     # Limits
     MAX_DIFF_BYTES: int = 10485760  # 10MB
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
 
 
 settings = Settings()

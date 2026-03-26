@@ -198,6 +198,23 @@ class DiffApplyResult(BaseModel):
 # LLM Agent 관련 스키마
 # ============================================================================
 
+# Java NoSQL 등에서 내려주는 히스토리 크기 상한 (과도한 페이로드 방지)
+_MAX_HISTORY_MESSAGES = 100
+_MAX_CHAT_MESSAGE_CHARS = 32_000
+
+
+class ChatMessage(BaseModel):
+    """채팅 한 턴 (Java 서버가 NoSQL에서 꺼내 본문에 실어 보냄).
+    
+    Attributes:
+        role: system / user / assistant (서버는 별도로 시스템 프롬프트를 두며,
+            history의 system은 선택적 — 클라이언트 정책에 맞춰 사용)
+        content: 메시지 본문
+    """
+    role: Literal["system", "user", "assistant"]
+    content: str = Field(..., max_length=_MAX_CHAT_MESSAGE_CHARS)
+
+
 class LLMExecuteRequest(BaseModel):
     """LLM에게 자연어 명령을 전달하는 요청 모델.
     
@@ -206,8 +223,9 @@ class LLMExecuteRequest(BaseModel):
     
     Attributes:
         user_id: Java 서버에서 전달된 사용자 ID (필수)
-        prompt: 사용자의 자연어 명령
+        prompt: 이번 턴 사용자 자연어 명령
             예: "이 코드 변경사항을 인덱스에 반영하고 블로그 글도 써줘"
+        history: 이전 대화 턴 (Java NoSQL에서 조회해 포함). 보통 user/assistant 교차.
         context: 추가 컨텍스트 정보 (코드 diff, 파일 목록, 메타데이터 등)
         model: 사용할 LLM 모델 (선택사항)
             예: "claude-3-5-sonnet", "gpt-4"
@@ -224,7 +242,12 @@ class LLMExecuteRequest(BaseModel):
         ... )
     """
     user_id: int = Field(..., description="User ID from Java server")
-    prompt: str = Field(..., description="사용자의 자연어 명령")
+    prompt: str = Field(..., description="이번 턴 사용자 자연어 명령")
+    history: List[ChatMessage] = Field(
+        default_factory=list,
+        description="이전 대화 (Java NoSQL 등에서 조회). 최대 100턴",
+        max_length=_MAX_HISTORY_MESSAGES,
+    )
     context: Dict[str, Any] = Field(
         default_factory=dict,
         description="추가 컨텍스트 정보 (diff, 파일, 메타데이터 등)"
@@ -245,6 +268,10 @@ class LLMExecuteRequest(BaseModel):
             "example": {
                 "user_id": 123,
                 "prompt": "이 코드 변경 내용을 요약해서 블로그 글 초안을 작성해줘",
+                "history": [
+                    {"role": "user", "content": "안녕"},
+                    {"role": "assistant", "content": "안녕하세요. 무엇을 도와드릴까요?"},
+                ],
                 "context": {
                     "code_changes": "새로운 기능 추가: 사용자 인증 로직 구현"
                 },

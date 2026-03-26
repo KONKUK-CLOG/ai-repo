@@ -26,21 +26,22 @@ async def lifespan(app: FastAPI):
     # 시작 시
     logger.info("Starting application...")
     
-    # 백그라운드 스케줄러 시작
-    start_scheduler()
-    logger.info("Background scheduler started")
-
-    # 서비스 토큰 매니저 초기화
-    await service_token_manager.startup()
-    logger.info("Service token manager initialized")
+    if settings.ENABLE_BACKGROUND_TASKS:
+        start_scheduler()
+        logger.info("Background scheduler started")
+        await service_token_manager.startup()
+        logger.info("Service token manager initialized")
+    else:
+        logger.info("Background tasks disabled (ENABLE_BACKGROUND_TASKS=false)")
     
     yield
     
     # 종료 시
     logger.info("Shutting down application...")
-    await service_token_manager.shutdown()
-    shutdown_scheduler()
-    logger.info("Background scheduler stopped")
+    if settings.ENABLE_BACKGROUND_TASKS:
+        await service_token_manager.shutdown()
+        shutdown_scheduler()
+        logger.info("Background scheduler stopped")
 
 
 # Create FastAPI app
