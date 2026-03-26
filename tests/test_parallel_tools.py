@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.server.schemas import LLMExecuteRequest
+from src.server.schemas import LLMExecuteRequest, LLMFinalArtifact
 from src.server.routers import agent
 
 
@@ -27,7 +27,9 @@ async def test_parallel_tool_execution_timing():
         mock_plan.return_value = ("thought", plans)
         with patch.object(agent, "_execute_regular_tool", side_effect=slow_execute):
             with patch.object(agent, "_generate_final_response", new_callable=AsyncMock) as mock_final:
-                mock_final.return_value = "final"
+                mock_final.return_value = LLMFinalArtifact(
+                    answer="a", blog_markdown="# x\n\ny"
+                )
                 req = LLMExecuteRequest(user_id=1, prompt="both", context={})
                 t0 = time.monotonic()
                 result = await agent.run_llm_execute_pipeline(req)
@@ -53,7 +55,9 @@ async def test_tool_results_order_matches_plan():
         mock_plan.return_value = ("t", plans)
         with patch.object(agent, "_execute_regular_tool", side_effect=execute_in_order):
             with patch.object(agent, "_generate_final_response", new_callable=AsyncMock) as mock_final:
-                mock_final.return_value = "x"
+                mock_final.return_value = LLMFinalArtifact(
+                    answer="x", blog_markdown="# m\n\nx"
+                )
                 result = await agent.run_llm_execute_pipeline(
                     LLMExecuteRequest(user_id=7, prompt="p", context={})
                 )

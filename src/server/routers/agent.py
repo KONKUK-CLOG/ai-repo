@@ -13,6 +13,7 @@ from src.server.schemas import (
     ChatMessage,
     LLMExecuteRequest,
     LLMExecuteResult,
+    LLMFinalArtifact,
     ToolCall,
 )
 from src.server.settings import settings
@@ -120,34 +121,34 @@ async def call_llm_with_tools(
     # 1. OpenAI 클라이언트 생성
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     
-    # 2. 시스템 프롬프트 구성
-    system_prompt = """당신은 사용자의 요청을 분석하고 적절히 응답하는 AI 어시스턴트입니다.
+    # 2. 시스템 프롬프트 구성 — 코드베이스 맥락 + 개인 블로그 초안(확인 후 게시)
+    system_prompt = """당신은 사용자의 코드베이스와 요청을 바탕으로 개인 기술 블로그용 글 초안을 준비하는 기획 어시스턴트입니다.
+
+제품 흐름(반드시 준수):
+- 산출물은 항상 사용자가 검토할 마크다운(.md) 형태의 블로그 초안으로 이어지도록, 필요한 근거를 툴로 수집합니다.
+- 실제 게시·업로드·발행 API 호출 등은 하지 않습니다. 초안만 제안합니다.
 
 사용 가능한 툴:
 - search_codebase: MongoDB에 인덱싱된 코드베이스 청크 검색 (파일 경로·내용 발췌)
-- get_user_blog_posts: 사용자의 블로그 포스트 기록 조회
+- get_user_blog_posts: 사용자의 블로그 포스트 기록 조회 (톤·구조·태그 패턴 참고)
 
 작업 지침:
-1. 요청을 먼저 분석하세요.
+1. 요청을 분석하고, 글 초안에 넣을 기술 근거·사용자 글 스타일이 필요한지 판단하세요.
 
-2. 코드 위치, 구현 방식, 버그 원인, 리팩터링, 아키텍처, "어디에 정의되어 있나", "이 함수가 뭐 하는지" 등
-   저장소에 근거한 답변이 필요하면 search_codebase를 호출하세요. 코드 관련 질문에서는 추측보다 검색을 우선하세요.
-   search_codebase의 query에는 찾고 싶은 식별자·개념·파일 이름 일부 등을 넣으세요.
+2. 코드 위치, 구현, 버그·리팩터링, 아키텍처, "어디에 정의되나", "이 함수 역할" 등 저장소 근거가 필요하면
+   search_codebase를 호출하세요. 코드 관련 주장은 추측보다 검색을 우선합니다.
+   query에는 식별자·개념·파일명 일부 등 검색어를 넣으세요.
 
-3. 블로그 글 작성·스타일·톤·태그 패턴이 필요하면 get_user_blog_posts를 호출하세요.
-   다음에 해당하면 블로그 툴을 쓰세요:
-   - 블로그 글/포스트/발행 요청, "블로그", "글", "포스트", "게시", "발행" 등
-   - 사용자 기존 글 스타일·주제·태그를 맞춰야 할 때
-   get_user_blog_posts 호출 후: 톤·구조·태그를 파악하고 마크다운 초안만 제안 (게시는 하지 않음).
+3. 블로그 톤·문장 리듬·제목/소제목 습관·태그 사용을 맞추려면 get_user_blog_posts를 호출하세요.
+   블로그 글/포스트 작성 요청, "블로그", "글", "포스트", "게시 준비", "발행 전 초안" 등에 해당하면 특히 호출합니다.
+   이 툴은 스타일 참고용이며, 여전히 게시는 사용자 확인 후입니다.
 
-4. 코드와 블로그가 모두 필요하면 두 툴을 모두 호출할 수 있습니다. 순서는 요청에 맞게 정하되,
-   코드 근거가 핵심이면 search_codebase를 먼저 호출하는 것이 좋습니다.
+4. 기술 블로그 글이면 코드 근거와 스타일이 모두 도움이 될 때 두 툴을 함께 호출할 수 있습니다.
+   코드가 글의 핵심이면 search_codebase를 먼저 호출하는 편이 좋습니다.
 
-5. 단순 잡담·일반 상식 등 저장소/블로그가 불필요하면 툴 없이 직접 답변하세요.
+5. 저장소·기존 글 없이도 충분한 순수 잡담·일반 상식만 있으면 툴 없이 답할 수 있습니다.
 
-블로그 초안 작성 시: 제목·본문·태그는 사용자 기존 패턴을 참고하세요.
-
-중요: 저장소나 블로그를 쓰면 품질이 올라간다고 판단되면 반드시 해당 툴을 호출하고, 근거 없이 단정하지 마세요."""
+중요: 초안 품질이 오르면 툴을 쓰는 것이 맞다고 판단되면 반드시 호출하고, 검색·조회 없이 코드 내용을 단정하지 마세요."""
     
     # 3. 사용자 메시지 구성
     context_str = json.dumps(context, ensure_ascii=False, indent=2) if context else "없음"
@@ -156,7 +157,7 @@ async def call_llm_with_tools(
 추가 컨텍스트:
 {context_str}
 
-위 요청을 처리하기 위해 필요한 툴을 선택하고 실행하세요."""
+위 요청을 처리하기 위해 필요한 툴을 선택하세요. (최종 블로그용 .md 초안은 이어지는 단계에서 작성됩니다.)"""
     
     # 4. 툴 스키마를 OpenAI 형식으로 변환
     openai_tools = []
@@ -351,7 +352,7 @@ async def run_llm_execute_pipeline(
 
     if settings.OPENAI_API_KEY:
         try:
-            final_response = await _generate_final_response(
+            final_artifact = await _generate_final_response(
                 request.prompt,
                 executed_tool_calls,
                 request.model,
@@ -359,15 +360,16 @@ async def run_llm_execute_pipeline(
             )
         except Exception as e:
             logger.error(f"Failed to generate final response from LLM: {e}")
-            final_response = _create_fallback_response(successful_tools, failed_tools)
+            final_artifact = _fallback_final_artifact(successful_tools, failed_tools)
     else:
-        final_response = _create_fallback_response(successful_tools, failed_tools)
+        final_artifact = _fallback_final_artifact(successful_tools, failed_tools)
 
     return LLMExecuteResult(
         ok=len(failed_tools) == 0,
         thought=thought,
         tool_calls=executed_tool_calls,
-        final_response=final_response,
+        final_response=final_artifact.blog_markdown,
+        final_artifact=final_artifact,
         model_used=request.model or settings.DEFAULT_LLM_MODEL,
     )
 
@@ -456,42 +458,100 @@ async def execute_llm_command_stream(request: LLMExecuteRequest) -> StreamingRes
     )
 
 
+def _parse_final_artifact(raw: Optional[str]) -> LLMFinalArtifact:
+    """2차 LLM 응답 문자열을 JSON으로 파싱해 LLMFinalArtifact로 만듭니다. 실패 시 폴백."""
+    if not raw or not raw.strip():
+        return LLMFinalArtifact(
+            answer="내용을 생성하지 못했습니다. 다시 시도해 주세요.",
+            blog_markdown="# 초안\n\n내용을 생성하지 못했습니다. 다시 시도해 주세요.",
+        )
+    text = raw.strip()
+    try:
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            raise ValueError("not an object")
+    except (json.JSONDecodeError, ValueError):
+        preview = text[:2000]
+        return LLMFinalArtifact(
+            answer=preview,
+            blog_markdown=f"# 초안\n\n{preview}",
+        )
+
+    answer = str(
+        data.get("answer")
+        or data.get("direct_answer")
+        or data.get("summary")
+        or ""
+    )
+    blog_markdown = str(
+        data.get("blog_markdown")
+        or data.get("markdown")
+        or data.get("blog_md")
+        or ""
+    )
+    if not blog_markdown.strip() and answer.strip():
+        blog_markdown = f"# 초안\n\n{answer.strip()}"
+    if not answer.strip() and blog_markdown.strip():
+        answer = "블로그 초안을 생성했습니다. 본문은 blog_markdown 필드를 확인하세요."
+
+    return LLMFinalArtifact(
+        answer=answer,
+        blog_markdown=blog_markdown.strip()
+        or "# 초안\n\n내용이 비어 있습니다.",
+    )
+
+
 async def _generate_final_response(
     original_prompt: str,
     tool_calls: list[ToolCall],
     model: str = None,
     history: Optional[List[ChatMessage]] = None,
-) -> str:
-    """Generate final user-friendly response using LLM.
-    
-    툴 실행 결과를 LLM에게 전달하여 사용자 친화적인 최종 응답을 생성합니다.
-    """
+) -> LLMFinalArtifact:
+    """툴 실행 결과를 바탕으로 answer / blog_markdown JSON 산출 (Java가 동기 응답으로 파싱)."""
+
     history = history or []
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-    
-    # 툴 실행 결과 요약
+
+    _TOOL_RESULT_PREVIEW_LEN = 3000
     tool_results_summary = []
     for tc in tool_calls:
         status = "✅ 성공" if tc.success else "❌ 실패"
-        tool_results_summary.append(
-            f"{status} {tc.tool}: {json.dumps(tc.result, ensure_ascii=False)[:200]}"
-        )
-    
-    summary_text = "\n".join(tool_results_summary)
-    
-    final_user_content = f"""사용자 요청: {original_prompt}
+        raw = json.dumps(tc.result, ensure_ascii=False)
+        preview = raw if len(raw) <= _TOOL_RESULT_PREVIEW_LEN else raw[:_TOOL_RESULT_PREVIEW_LEN] + "…(잘림)"
+        tool_results_summary.append(f"{status} {tc.tool}: {preview}")
 
-실행된 작업 결과:
+    summary_text = "\n".join(tool_results_summary) if tool_results_summary else "(툴 실행 없음 — 사용자 요청만 반영하세요.)"
+
+    final_system = """당신은 개인 기술 블로그 초안과 사용자 응답을 함께 만드는 편집자입니다.
+
+반드시 유효한 JSON 객체 하나만 출력하세요. 앞뒤 설명 문장이나 마크다운 코드펜스(```)를 붙이지 마세요.
+
+필수 키(정확히 이 두 개만 사용):
+- "answer": 문자열. 사용자 질의에 대한 직접 답·요약(채팅용). 블로그 글 전체는 넣지 않음.
+- "blog_markdown": 문자열. .md로 저장할 블로그 초안 전체. 첫 줄은 `# 제목`. `##` 소제목, 코드는 ```언어 ... ```. 끝에 `태그: a, b` 한 줄 권장.
+
+추론·계획 과정은 출력에 포함하지 마세요. 내부적으로 요청과 툴 결과를 모두 반영해 answer와 blog_markdown만 작성하세요.
+
+규칙:
+- 실제 게시·업로드·발행했다는 표현 금지. 초안이며 사용자 확인 후 게시임을 answer에 짧게 언급 가능.
+- JSON 문자열 값의 줄바꿈·따옴표는 JSON 이스케이프를 따르세요."""
+
+    final_user_content = f"""사용자 요청:
+{original_prompt}
+
+수집된 정보(툴 결과):
 {summary_text}
 
-위 결과를 바탕으로 사용자에게 친절하고 명확한 최종 응답을 한국어로 작성해주세요.
-간결하게 2-3문장으로 요약해주세요."""
+위 내용을 반영해 반드시 아래 형식의 JSON만 출력하세요:
+{{"answer":"...","blog_markdown":"..."}}
+
+blog_markdown 작성 시:
+- search_codebase 결과가 있으면 경로·발췌를 녹이고, 실패한 툴이 있으면 한계를 짧게 밝힘.
+- get_user_blog_posts가 있으면 톤·제목·태그 습관을 맞춤.
+언어: 기본 한국어."""
 
     messages: List[Dict[str, str]] = [
-        {
-            "role": "system",
-            "content": "당신은 작업 결과를 사용자에게 친절하고 명확하게 전달하는 어시스턴트입니다."
-        }
+        {"role": "system", "content": final_system},
     ]
     messages.extend(_history_to_openai_messages(history))
     messages.append({"role": "user", "content": final_user_content})
@@ -500,23 +560,35 @@ async def _generate_final_response(
         model=model or settings.DEFAULT_LLM_MODEL,
         messages=messages,
         temperature=0.7,
-        max_tokens=500
+        max_tokens=settings.LLM_MAX_TOKENS,
+        response_format={"type": "json_object"},
     )
-    
-    return response.choices[0].message.content or "작업이 완료되었습니다."
+
+    content = response.choices[0].message.content
+    return _parse_final_artifact(content)
 
 
 def _create_fallback_response(successful_tools: list[str], failed_tools: list[str]) -> str:
-    """Create fallback response when LLM is unavailable."""
+    """Create fallback human message when LLM is unavailable."""
     if failed_tools:
         return (
             f"일부 작업을 완료했습니다. "
             f"성공: {', '.join(successful_tools) if successful_tools else '없음'}, "
             f"실패: {', '.join(failed_tools)}"
         )
-    else:
-        return (
-            f"요청하신 작업을 모두 완료했습니다. "
-            f"실행된 작업: {', '.join(successful_tools)}"
-        )
+    return (
+        f"요청하신 작업을 모두 완료했습니다. "
+        f"실행된 작업: {', '.join(successful_tools) if successful_tools else '없음'}"
+    )
+
+
+def _fallback_final_artifact(
+    successful_tools: list[str], failed_tools: list[str]
+) -> LLMFinalArtifact:
+    """LLM 불가 시에도 Java가 동일 스키마로 파싱할 수 있게 합니다."""
+    msg = _create_fallback_response(successful_tools, failed_tools)
+    return LLMFinalArtifact(
+        answer=msg,
+        blog_markdown=f"# 초안\n\n{msg}\n\n태그: clog, 상태",
+    )
 

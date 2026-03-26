@@ -280,6 +280,17 @@ class LLMExecuteRequest(BaseModel):
         }
 
 
+class LLMFinalArtifact(BaseModel):
+    """2차 LLM 최종 산출물 — Java가 일반 HTTP 응답으로 받아 파싱 (Lambda↔Java SSE 없음).
+
+    Attributes:
+        answer: 사용자 질의에 대한 직접 답변·요약 (채팅/UI용).
+        blog_markdown: 저장·편집·게시 검토용 블로그 초안 전체 (.md 본문).
+    """
+    answer: str = Field(..., description="사용자 질의에 대한 직접 답변")
+    blog_markdown: str = Field(..., description="블로그 초안 마크다운")
+
+
 class ToolCall(BaseModel):
     """LLM이 선택하고 실행한 툴 호출 정보.
     
@@ -312,7 +323,8 @@ class LLMExecuteResult(BaseModel):
         ok: 전체 작업 성공 여부
         thought: LLM의 사고 과정 또는 추론 내용 (선택사항)
         tool_calls: 실행된 툴들의 목록과 각각의 결과
-        final_response: 사용자에게 보여줄 LLM의 최종 응답
+        final_response: 하위 호환용 — 블로그 마크다운 본문(`final_artifact.blog_markdown`과 동일하게 채움).
+        final_artifact: 구조화된 최종 결과(answer / blog_markdown). Java 파싱 권장.
         model_used: 실제 사용된 LLM 모델
     
     Example:
@@ -323,6 +335,10 @@ class LLMExecuteResult(BaseModel):
         ...         ToolCall(tool="get_user_blog_posts", ...)
         ...     ],
         ...     final_response="# 블로그 글 제목\\n\\n마크다운 형식의 블로그 내용...",
+        ...     final_artifact=LLMFinalArtifact(
+        ...         answer="...",
+        ...         blog_markdown="# 블로그 글 제목\\n\\n...",
+        ...     ),
         ...     model_used="gpt-4-turbo-preview"
         ... )
     """
@@ -330,6 +346,7 @@ class LLMExecuteResult(BaseModel):
     thought: Optional[str] = None
     tool_calls: List[ToolCall]
     final_response: str
+    final_artifact: Optional[LLMFinalArtifact] = None
     model_used: Optional[str] = None
 
 
