@@ -7,8 +7,6 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
-# from src.server.deps import get_current_user  # 주석 처리: TS 직접 통신 시 사용했던 함수. 현재는 Java 서버를 통해 내부 통신하므로 사용하지 않음
-# from src.models.user import User  # 주석 처리: JWT 인증이 필요 없으므로 User 모델 사용하지 않음
 from src.server.schemas import (
     ChatMessage,
     LLMExecuteRequest,
@@ -17,29 +15,14 @@ from src.server.schemas import (
     ToolCall,
 )
 from src.server.settings import settings
-from src.mcp.tools import (
-    get_user_blog_posts,
-    search_codebase_mongo,
-    # 주석 처리: RAG 관련 툴은 다음 학기 구현 예정
-    # search_vector_db,
-    # search_graph_db
-)
+from src.mcp.tools import get_user_blog_posts, search_codebase_mongo
 
 router = APIRouter(prefix="/internal/v1/llm", tags=["llm-agent"])
 logger = logging.getLogger(__name__)
 
-# ============================================================================
-# 툴 레지스트리 (Tool Registry)
-# ============================================================================
-
-# 사용 가능한 모든 툴의 중앙 레지스트리
-# agent.py와 commands.py에서 공유하여 사용
 TOOLS_REGISTRY = {
     "get_user_blog_posts": get_user_blog_posts,
     "search_codebase": search_codebase_mongo,
-    # 주석 처리: RAG 관련 툴은 다음 학기 구현 예정
-    # "search_vector_db": search_vector_db,
-    # "search_graph_db": search_graph_db,
 }
 
 
@@ -56,7 +39,9 @@ def _llm_result_to_dict(result: LLMExecuteResult) -> Dict[str, Any]:
     return json.loads(result.model_dump_json())
 
 
-ProgressCallback = Optional[Callable[[Dict[str, Any]], Awaitable[None]]]
+# SSE: (event_name, data_dict) -> e.g. ("planning", {"delta": "..."})
+SseEmitCallback = Callable[[str, Dict[str, Any]], Awaitable[None]]
+OptionalSseEmit = Optional[SseEmitCallback]
 
 
 async def _execute_regular_tool(tool_name: str, params: dict, user_api_key: str | None = None) -> dict:
@@ -91,6 +76,7 @@ async def call_llm_with_tools(
     available_tools: list,
     model: str = None,
     history: Optional[List[ChatMessage]] = None,
+    emit: OptionalSseEmit = None,
 ) -> tuple[str, list[dict]]:
     """Call OpenAI GPT with available tools and get tool calls.
     
@@ -176,23 +162,81 @@ async def call_llm_with_tools(
     messages.extend(_history_to_openai_messages(history))
     messages.append({"role": "user", "content": user_message})
 
+    mdl = model or settings.DEFAULT_LLM_MODEL
     try:
+        if emit is not None:
+            stream = await client.chat.completions.create(
+                model=mdl,
+                messages=messages,
+                tools=openai_tools,
+                tool_choice="auto",
+                temperature=settings.LLM_TEMPERATURE,
+                max_tokens=settings.LLM_MAX_TOKENS,
+                stream=True,
+            )
+            thought_parts: List[str] = []
+            tc_acc: Dict[int, Dict[str, str]] = {}
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                choice0 = chunk.choices[0]
+                delta = choice0.delta
+                if delta is None:
+                    continue
+                if getattr(delta, "content", None):
+                    thought_parts.append(delta.content)
+                    await emit("planning", {"delta": delta.content})
+                tcd = getattr(delta, "tool_calls", None)
+                if tcd:
+                    for tc in tcd:
+                        i = tc.index
+                        if i not in tc_acc:
+                            tc_acc[i] = {"id": "", "name": "", "arguments": ""}
+                        if getattr(tc, "id", None):
+                            tc_acc[i]["id"] = tc.id
+                        fn = getattr(tc, "function", None)
+                        if fn is not None:
+                            if getattr(fn, "name", None):
+                                tc_acc[i]["name"] = fn.name
+                            if getattr(fn, "arguments", None):
+                                tc_acc[i]["arguments"] += fn.arguments
+
+            thought = "".join(thought_parts) or "툴 실행을 시작합니다."
+            tool_calls: list[dict] = []
+            for idx in sorted(tc_acc.keys()):
+                entry = tc_acc[idx]
+                name = entry.get("name") or ""
+                if not name:
+                    continue
+                try:
+                    params = json.loads(entry.get("arguments") or "{}")
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse streamed tool arguments: {e}")
+                    continue
+                tool_calls.append({"tool": name, "params": params})
+                logger.info(f"Tool selected: {name}")
+
+            if not tool_calls:
+                logger.warning("LLM did not select any tools")
+                thought = thought or "요청을 처리할 적절한 툴을 찾지 못했습니다."
+            logger.info(f"LLM stream done (planning), model={mdl}")
+            return thought, tool_calls
+
         response = await client.chat.completions.create(
-            model=model or settings.DEFAULT_LLM_MODEL,
+            model=mdl,
             messages=messages,
             tools=openai_tools,
             tool_choice="auto",
             temperature=settings.LLM_TEMPERATURE,
-            max_tokens=settings.LLM_MAX_TOKENS
+            max_tokens=settings.LLM_MAX_TOKENS,
         )
-        
+
         logger.info(f"LLM response received from {response.model}")
-        
-        # 6. 응답 파싱
+
         message = response.choices[0].message
         thought = message.content or "툴 실행을 시작합니다."
         tool_calls = []
-        
+
         if message.tool_calls:
             for tool_call in message.tool_calls:
                 try:
@@ -205,17 +249,15 @@ async def call_llm_with_tools(
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse tool arguments: {e}")
                     continue
-        
-        # 툴이 선택되지 않은 경우
+
         if not tool_calls:
             logger.warning("LLM did not select any tools")
             thought = thought or "요청을 처리할 적절한 툴을 찾지 못했습니다."
-        
+
         return thought, tool_calls
-        
+
     except Exception as e:
         logger.error(f"LLM API call failed: {e}")
-        # 폴백: 더미 로직 사용
         return _fallback_tool_selection(prompt, context)
 
 
@@ -246,15 +288,15 @@ def _fallback_tool_selection(prompt: str, context: dict) -> tuple[str, list[dict
 
 async def run_llm_execute_pipeline(
     request: LLMExecuteRequest,
-    progress: ProgressCallback = None,
+    emit: OptionalSseEmit = None,
 ) -> LLMExecuteResult:
-    """LLM 실행 전 과정(툴 계획 → 실행 → 최종 응답). SSE 등에서 progress 콜백으로 단계 전달."""
+    """LLM 실행 전 과정. emit이 있으면 이름 붙은 SSE 이벤트(planning, answer, blog, …)로 실시간 전달."""
 
-    async def emit(payload: Dict[str, Any]) -> None:
-        if progress:
-            await progress(payload)
+    async def _emit(event: str, data: Dict[str, Any]) -> None:
+        if emit:
+            await emit(event, data)
 
-    await emit({"phase": "started", "message": "요청 처리 시작"})
+    await _emit("started", {"message": "요청 처리 시작"})
 
     logger.info(f"LLM execute request: {request.prompt}")
 
@@ -263,23 +305,19 @@ async def run_llm_execute_pipeline(
         if hasattr(tool_module, "TOOL"):
             available_tools.append(tool_module.TOOL)
 
-    await emit({"phase": "llm_planning", "message": "툴 선택을 위해 LLM 호출 중"})
-
     thought, tool_calls_to_make = await call_llm_with_tools(
         prompt=request.prompt,
         context=request.context,
         available_tools=available_tools,
         model=request.model,
         history=list(request.history),
+        emit=emit,
     )
 
     tool_names_planned = [tc["tool"] for tc in tool_calls_to_make]
-    await emit(
-        {
-            "phase": "llm_planning_done",
-            "message": "LLM 툴 계획 완료",
-            "tools": tool_names_planned,
-        }
+    await _emit(
+        "planning_done",
+        {"tools": tool_names_planned, "message": "LLM 툴 계획 완료"},
     )
 
     async def _run_one_tool(tool_call_plan: dict) -> ToolCall:
@@ -311,12 +349,9 @@ async def run_llm_execute_pipeline(
 
     for tool_call_plan in tool_calls_to_make:
         tool_name = tool_call_plan["tool"]
-        await emit(
-            {
-                "phase": "tool_running",
-                "tool": tool_name,
-                "message": f"{tool_name} 실행 중",
-            }
+        await _emit(
+            "tool_running",
+            {"tool": tool_name, "message": f"{tool_name} 실행 중"},
         )
 
     if tool_calls_to_make:
@@ -336,19 +371,17 @@ async def run_llm_execute_pipeline(
                 else str(tc.result)
             )
         )
-        await emit(
+        await _emit(
+            "tool_done",
             {
-                "phase": "tool_done",
                 "tool": tc.tool,
                 "success": tc.success,
                 "message": done_msg,
-            }
+            },
         )
 
     successful_tools = [tc.tool for tc in executed_tool_calls if tc.success]
     failed_tools = [tc.tool for tc in executed_tool_calls if not tc.success]
-
-    await emit({"phase": "generating_final", "message": "최종 응답 생성 중"})
 
     if settings.OPENAI_API_KEY:
         try:
@@ -357,6 +390,7 @@ async def run_llm_execute_pipeline(
                 executed_tool_calls,
                 request.model,
                 history=list(request.history),
+                emit=emit,
             )
         except Exception as e:
             logger.error(f"Failed to generate final response from LLM: {e}")
@@ -409,29 +443,27 @@ async def execute_llm_command(
 
 @router.post("/execute/stream")
 async def execute_llm_command_stream(request: LLMExecuteRequest) -> StreamingResponse:
-    """동일 본문으로 LLM 실행; 진행 단계는 SSE(`event: progress`), 완료 시 `event: complete`.
+    """동일 본문으로 LLM 실행. SSE 이벤트: started, planning, planning_done, tool_running, tool_done, answer, blog, complete, error.
 
-    페이로드는 JSON이며 `phase`로 단계를 구분합니다:
-    started, llm_planning, llm_planning_done, tool_running, tool_done, generating_final,
-    오류 시 `event: error`.
+    각 `data:` 는 JSON 객체. `planning`/`answer`/`blog` 는 `{"delta":"..."}` 청크. 자세한 계약은 README.
     """
 
     async def event_gen():
         queue: asyncio.Queue = asyncio.Queue()
 
-        async def progress(payload: Dict[str, Any]) -> None:
-            await queue.put(_format_sse("progress", payload))
+        async def sse_emit(event_name: str, data: Dict[str, Any]) -> None:
+            await queue.put(_format_sse(event_name, data))
 
         async def runner() -> None:
             try:
-                result = await run_llm_execute_pipeline(request, progress=progress)
+                result = await run_llm_execute_pipeline(request, emit=sse_emit)
                 await queue.put(_format_sse("complete", _llm_result_to_dict(result)))
             except Exception as e:
                 logger.exception("Stream LLM execute failed")
                 await queue.put(
                     _format_sse(
                         "error",
-                        {"phase": "error", "message": str(e)},
+                        {"message": str(e), "code": "ExecuteError"},
                     )
                 )
             finally:
@@ -501,13 +533,42 @@ def _parse_final_artifact(raw: Optional[str]) -> LLMFinalArtifact:
     )
 
 
+async def _stream_text_deltas(
+    client: AsyncOpenAI,
+    *,
+    model: str,
+    messages: List[Dict[str, str]],
+    emit: SseEmitCallback,
+    event_name: str,
+) -> str:
+    """OpenAI chat stream에서 content 델타만 이어 붙이며 SSE로 전달합니다."""
+    stream = await client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=0.7,
+        max_tokens=settings.LLM_MAX_TOKENS,
+        stream=True,
+    )
+    parts: List[str] = []
+    async for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+        if delta is None or not getattr(delta, "content", None):
+            continue
+        parts.append(delta.content)
+        await emit(event_name, {"delta": delta.content})
+    return "".join(parts)
+
+
 async def _generate_final_response(
     original_prompt: str,
     tool_calls: list[ToolCall],
     model: str = None,
     history: Optional[List[ChatMessage]] = None,
+    emit: OptionalSseEmit = None,
 ) -> LLMFinalArtifact:
-    """툴 실행 결과를 바탕으로 answer / blog_markdown JSON 산출 (Java가 동기 응답으로 파싱)."""
+    """툴 결과를 바탕으로 answer + blog_markdown 생성. emit 있으면 두 번 스트림(SSE answer/blog), 없으면 JSON 한 번."""
 
     history = history or []
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
@@ -521,6 +582,62 @@ async def _generate_final_response(
         tool_results_summary.append(f"{status} {tc.tool}: {preview}")
 
     summary_text = "\n".join(tool_results_summary) if tool_results_summary else "(툴 실행 없음 — 사용자 요청만 반영하세요.)"
+    mdl = model or settings.DEFAULT_LLM_MODEL
+    hist_msgs = _history_to_openai_messages(history)
+
+    if emit is not None:
+        answer_system = (
+            "당신은 기술 블로그 작업을 돕는 어시스턴트입니다. "
+            "출력은 채팅에 보여 줄 짧은 답변·요약만 작성하세요. 마크다운 글 전체는 쓰지 마세요. "
+            "실제 게시했다고 말하지 마세요. 초안 단계임을 한 문장 안에서 짧게 언급해도 됩니다."
+        )
+        answer_user = f"""사용자 요청:
+{original_prompt}
+
+수집된 정보(툴 결과):
+{summary_text}
+
+위를 바탕으로 사용자 질의에 대한 직접 답·요약만 한국어로 작성하세요. (2~6문장 정도)"""
+
+        ans_messages: List[Dict[str, str]] = [
+            {"role": "system", "content": answer_system},
+            *hist_msgs,
+            {"role": "user", "content": answer_user},
+        ]
+        answer_text = await _stream_text_deltas(
+            client, model=mdl, messages=ans_messages, emit=emit, event_name="answer"
+        )
+
+        blog_system = (
+            "당신은 개인 기술 블로그용 마크다운 초안을 작성합니다. "
+            "출력은 순수 마크다운만 (전체를 코드펜스로 감싸지 마세요). "
+            "첫 줄은 `# 제목`, `##` 소제목, 코드는 ```언어 ... ```, 끝에 `태그: a, b` 한 줄. "
+            "실제 게시·발행은 하지 않았다고 가정하고 작성하세요."
+        )
+        blog_user = f"""사용자 요청:
+{original_prompt}
+
+수집된 정보(툴 결과):
+{summary_text}
+
+위를 바탕으로 블로그에 넣을 한 편의 초안을 한국어 마크다운으로 작성하세요.
+search_codebase 결과가 있으면 경로·발췌를 녹이고, 실패한 툴이 있으면 한계를 짧게 밝히세요.
+get_user_blog_posts가 있으면 톤·제목·태그 습관을 맞추세요."""
+
+        blog_messages: List[Dict[str, str]] = [
+            {"role": "system", "content": blog_system},
+            *hist_msgs,
+            {"role": "user", "content": blog_user},
+        ]
+        blog_text = await _stream_text_deltas(
+            client, model=mdl, messages=blog_messages, emit=emit, event_name="blog"
+        )
+
+        if not answer_text.strip():
+            answer_text = "블로그 초안을 생성했습니다. 본문은 blog 이벤트 스트림 및 complete.final_artifact를 확인하세요."
+        if not blog_text.strip():
+            blog_text = f"# 초안\n\n{answer_text.strip() or '내용 없음'}\n\n태그: 초안"
+        return LLMFinalArtifact(answer=answer_text.strip(), blog_markdown=blog_text.strip())
 
     final_system = """당신은 개인 기술 블로그 초안과 사용자 응답을 함께 만드는 편집자입니다.
 
@@ -553,11 +670,11 @@ blog_markdown 작성 시:
     messages: List[Dict[str, str]] = [
         {"role": "system", "content": final_system},
     ]
-    messages.extend(_history_to_openai_messages(history))
+    messages.extend(hist_msgs)
     messages.append({"role": "user", "content": final_user_content})
 
     response = await client.chat.completions.create(
-        model=model or settings.DEFAULT_LLM_MODEL,
+        model=mdl,
         messages=messages,
         temperature=0.7,
         max_tokens=settings.LLM_MAX_TOKENS,

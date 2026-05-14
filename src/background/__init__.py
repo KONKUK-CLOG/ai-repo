@@ -1,2 +1,0 @@
-"""Background tasks and scheduling."""
-

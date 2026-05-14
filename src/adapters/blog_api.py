@@ -4,9 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-import httpx
-
 from src.adapters import java_backend
+from src.adapters.java_backend import JavaBackendError
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,7 @@ async def get_user_articles(
         }
     
     Raises:
-        httpx.HTTPError: Java backend 요청 실패 시
+        JavaBackendError: Java backend 요청 실패 시
     """
     try:
         response = await java_backend.get_user_blog_posts(
@@ -43,7 +42,7 @@ async def get_user_articles(
         )
         logger.info(f"Retrieved {len(response.get('posts', []))} blog posts for user {user_id}")
         return response
-    except httpx.HTTPError as exc:
+    except JavaBackendError as exc:
         logger.error("Failed to retrieve blog articles via Java backend: %s", exc)
         raise
 

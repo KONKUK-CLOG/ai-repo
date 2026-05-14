@@ -1,140 +1,66 @@
 """FastAPI application entry point."""
 import logging
-import asyncio
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI
+
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from src.server.routers import health, diffs, agent, auth
+
+from src.server.routers import agent, health
 from src.server.settings import settings
-from src.adapters.service_token_manager import service_token_manager
-from src.background.scheduler import start_scheduler, shutdown_scheduler, run_task_now
-# from src.server.deps import get_java_service_identity  # 주석 처리: 서비스 간 JWT 통신 시 사용했던 함수. 현재는 같은 EC2 내부 통신이므로 JWT 불필요
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
 logger = logging.getLogger(__name__)
 
 
-# FastAPI 생명주기 관리
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """앱 시작/종료 시 실행되는 코드"""
-    # 시작 시
+    """Lightweight lifespan (no background workers; Lambda uses Mangum lifespan=off)."""
     logger.info("Starting application...")
-    
-    if settings.ENABLE_BACKGROUND_TASKS:
-        start_scheduler()
-        logger.info("Background scheduler started")
-        await service_token_manager.startup()
-        logger.info("Service token manager initialized")
-    else:
-        logger.info("Background tasks disabled (ENABLE_BACKGROUND_TASKS=false)")
-    
     yield
-    
-    # 종료 시
     logger.info("Shutting down application...")
-    if settings.ENABLE_BACKGROUND_TASKS:
-        await service_token_manager.shutdown()
-        shutdown_scheduler()
-        logger.info("Background scheduler stopped")
 
 
-# Create FastAPI app
 app = FastAPI(
-    title="TS-LLM-MCP Bridge",
-    description="REST API bridge for TypeScript client to Python MCP tools",
+    title="Clog LLM Bridge",
+    description="Internal LLM and tool endpoints for Java → Lambda",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan  # 생명주기 추가
+    lifespan=lifespan,
 )
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include routers
 app.include_router(health.router)
-app.include_router(auth.router)  # Auth router (no API key required)
-app.include_router(diffs.router)
 app.include_router(agent.router)
-
-# 조건부: 개발 환경에서만 직접 툴 실행 엔드포인트 활성화
-if settings.ENABLE_DIRECT_TOOLS:
-    from src.server.routers import commands
-    app.include_router(commands.router)
-    logger.warning("⚠️  Direct tool execution endpoints enabled (development mode)")
 
 
 @app.get("/")
 async def root():
-    """Root endpoint.
-    
-    Returns:
-        Welcome message with API info
-    """
     return {
-        "message": "TS-LLM-MCP Bridge API",
+        "message": "Clog LLM Bridge API",
         "version": "1.0.0",
-        "docs": "/docs"
+        "docs": "/docs",
     }
-
-
-# Admin endpoints for manual triggers
-# 주석 처리: WAL 관련 엔드포인트는 다음 학기 구현 예정
-# 현재는 엔드포인트 구조만 유지하고, 실제 처리는 하지 않습니다.
-# @app.post("/api/v1/admin/wal-recovery")
-# async def trigger_wal_recovery():
-#     """수동으로 WAL 복구 트리거 (관리자 전용)
-#     
-#     실패한 WAL 작업을 즉시 재시도합니다.
-#     Java 서버에서만 호출되므로 별도 인증 없이 사용 가능 (같은 EC2 내부 통신)
-#     """
-#     asyncio.create_task(run_task_now("wal_recovery"))
-#     return {"message": "WAL recovery task triggered"}
-# 
-# 
-# @app.post("/api/v1/admin/wal-cleanup")
-# async def trigger_wal_cleanup():
-#     """수동으로 WAL 정리 트리거 (관리자 전용)
-#     
-#     7일 이상 된 성공한 WAL 엔트리를 삭제합니다.
-#     Java 서버에서만 호출되므로 별도 인증 없이 사용 가능 (같은 EC2 내부 통신)
-#     """
-#     asyncio.create_task(run_task_now("wal_cleanup"))
-#     return {"message": "WAL cleanup task triggered"}
-# 
-# 
-# @app.get("/api/v1/admin/wal-stats")
-# async def get_wal_stats():
-#     """WAL 통계 조회
-#     
-#     Returns:
-#         전체 WAL 엔트리 수, 상태별 카운트
-#     
-#     Java 서버에서만 호출되므로 별도 인증 없이 사용 가능 (같은 EC2 내부 통신)
-#     """
-#     from src.background.wal import wal
-#     stats = await wal.get_statistics()
-#     return stats
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "src.server.main:app",
         host=settings.SERVER_HOST,
         port=settings.SERVER_PORT,
-        reload=True
+        reload=True,
     )
-
