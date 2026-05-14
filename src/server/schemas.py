@@ -26,7 +26,7 @@ class LLMExecuteRequest(BaseModel):
     )
     context: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Extra JSON context (metadata, snippets, etc.)",
+        description='Extra JSON (metadata, snippets). For nested Mongo layout include "project_id" (e.g. "project_1") so search_codebase can scope the project.',
     )
     model: Optional[str] = Field(None, description="OpenAI model id override")
     max_iterations: int = Field(

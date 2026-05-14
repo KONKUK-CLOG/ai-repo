@@ -115,7 +115,7 @@ async def call_llm_with_tools(
 - 실제 게시·업로드·발행 API 호출 등은 하지 않습니다. 초안만 제안합니다.
 
 사용 가능한 툴:
-- search_codebase: MongoDB에 인덱싱된 코드베이스 청크 검색 (파일 경로·내용 발췌)
+- search_codebase: MongoDB에 인덱싱된 코드베이스 청크 검색 (파일 경로·내용 발췌). 서버가 nested_user_doc 레이아웃이면 project_id를 툴 인자로 넣거나, Java가 context.project_id를 주면 서버가 주입합니다.
 - get_user_blog_posts: 사용자의 블로그 포스트 기록 조회 (톤·구조·태그 패턴 참고)
 
 작업 지침:
@@ -325,6 +325,10 @@ async def run_llm_execute_pipeline(
         params = dict(tool_call_plan["params"])
         if tool_name in ("get_user_blog_posts", "search_codebase"):
             params["user_id"] = request.user_id
+        if tool_name == "search_codebase" and not params.get("project_id"):
+            ctx_pid = request.context.get("project_id")
+            if ctx_pid is not None:
+                params["project_id"] = str(ctx_pid).strip() or None
         try:
             result = await _execute_regular_tool(
                 tool_name,

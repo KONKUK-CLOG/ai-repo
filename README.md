@@ -144,9 +144,32 @@ LLM 툴 `search_codebase`는 **Motor**로 MongoDB에 직접 접속합니다. Lam
 - `CODEBASE_MONGO_DB` / `CODEBASE_MONGO_COLLECTION`: 기본값 `clog` / `codebase_chunks`.
 - `CODEBASE_MONGO_USER_ID_FIELD`, `CODEBASE_MONGO_PATH_FIELD`, `CODEBASE_MONGO_CONTENT_FIELD`: 문서 필드명.
 - `CODEBASE_MONGO_PREVIEW_MAX_CHARS`: 응답 본문 미리보기 길이 상한.
+- **BM25 정렬**: 후보는 기존과 같이 `user_id` + 본문 **대소문자 무시 부분 일치**(`$regex`, `re.escape`)로 가져온 뒤, Python **`rank_bm25` (BM25Okapi)** 로 점수를 매겨 상위 `top_k`만 반환합니다. **MongoDB 텍스트 인덱스는 필요 없습니다.** IDF는 후보 집합 안에서만 계산됩니다.
+- `CODEBASE_MONGO_BM25_MAX_CANDIDATES` (기본 `500`, 최대 `5000`): 위 regex에 걸린 문서가 이보다 많으면 Mongo `find`/`aggregate`의 `limit`으로만 잘라 온 뒤 그 안에서만 BM25 순위가 결정됩니다.
+- **`CODEBASE_MONGO_LAYOUT`**: `flat`(기본) 또는 `nested_user_doc`.
+  - **flat**: 문서마다 `{ user_id, path, content }` 한 청크(기존 동작).
+  - **nested_user_doc**: **유저당 문서 1개**를 가정(`user_id`로 `$match` 후 `$limit: 1`). `projects.<project_id>.codebase`가 `{ path, content }` 객체의 **배열**이어야 합니다. Java는 `LLMExecuteRequest.context.project_id`(예: `project_1`)를 넣거나, LLM이 `search_codebase`의 `project_id` 인자를 넘깁니다. `project_id`는 영문·숫자·`_`·`-`만 허용합니다.
+- Nested 전용 필드명: `CODEBASE_MONGO_PROJECTS_FIELD`(기본 `projects`), `CODEBASE_MONGO_CODEBASE_ARRAY_FIELD`(기본 `codebase`). 배열 원소 안의 경로/본문 키는 `CODEBASE_MONGO_PATH_FIELD` / `CODEBASE_MONGO_CONTENT_FIELD`와 동일하게 씁니다.
 
-예상 문서 형태: `{ "user_id": 1, "path": "src/foo.py", "content": "..." }`. 검색은 해당 사용자의 문서만 대상으로, 본문에 대한 대소문자 무시 부분 일치(`$regex`, 검색어는 `re.escape`)입니다. 데이터가 크면 인덱스나 Atlas Search 도입을 검토하세요.
+**flat 예시 문서**: `{ "user_id": 1, "path": "src/foo.py", "content": "..." }`
 
+**nested 예시 문서** (한 유저 한 문서):
+
+```json
+{
+  "user_id": 1,
+  "projects": {
+    "project_1": {
+      "codebase": [
+        { "path": "src/foo.py", "content": "def main(): ..." }
+      ],
+      "chat_history": {}
+    }
+  }
+}
+```
+
+데이터가 크면 인덱스나 Atlas Search 도입을 검토하세요.
 ## 🚀 빠른 시작 (다중 사용자)
 
 ### 1. Java Auth 서버 준비

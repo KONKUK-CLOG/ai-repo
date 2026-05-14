@@ -1,5 +1,5 @@
 """Application settings loaded from environment variables."""
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     CODEBASE_MONGO_PATH_FIELD: str = "path"
     CODEBASE_MONGO_CONTENT_FIELD: str = "content"
     CODEBASE_MONGO_PREVIEW_MAX_CHARS: int = 2000
+    # Regex-matched candidates are BM25-ranked in Python; cap avoids huge memory use.
+    CODEBASE_MONGO_BM25_MAX_CANDIDATES: int = 500
+    # flat: one chunk per document (user_id + path + content). nested_user_doc: one document per user with projects[projectId].codebase[].
+    CODEBASE_MONGO_LAYOUT: Literal["flat", "nested_user_doc"] = "flat"
+    CODEBASE_MONGO_PROJECTS_FIELD: str = "projects"
+    CODEBASE_MONGO_CODEBASE_ARRAY_FIELD: str = "codebase"
 
     OPENAI_API_KEY: Optional[str] = None
     DEFAULT_LLM_MODEL: str = "gpt-4-turbo-preview"
